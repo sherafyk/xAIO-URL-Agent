@@ -8,12 +8,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from openai import OpenAI
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("call_openai_claims")
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -66,6 +79,13 @@ Rules:
 - Output ONLY claim_text and claim_type per claim.
 """
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError, APIError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 def call_openai_structured(model: str, schema: Type[BaseModel], user_input: Dict[str, Any], reasoning_effort: Optional[str]) -> Tuple[Optional[BaseModel], Dict[str, Any]]:
     client = OpenAI()
     req: Dict[str, Any] = dict(
@@ -100,57 +120,76 @@ def main() -> int:
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    ai_input = load_json(ai_path)
+    item_id = ai_path.stem.replace(".ai_input", "")
+    start_time = time.monotonic()
+    log_event(logger, stage="claims_start", item_id=item_id, message="claims parse starting")
 
-    canon = (((ai_input.get("url") or {}).get("clean") or {}).get("canonical")
-             or (ai_input.get("url") or {}).get("final")
-             or (ai_input.get("url") or {}).get("original"))
+    try:
+        ai_input = load_json(ai_path)
 
-    user_input = {
-      "canonical_url": canon,
-      "meta": ai_input.get("meta", {}),
-      "content": {
-         "extracted_text_full": (ai_input.get("content") or {}).get("extracted_text_full","")
-      }
-    }
+        canon = (((ai_input.get("url") or {}).get("clean") or {}).get("canonical")
+                 or (ai_input.get("url") or {}).get("final")
+                 or (ai_input.get("url") or {}).get("original"))
 
+        user_input = {
+            "canonical_url": canon,
+            "meta": ai_input.get("meta", {}),
+            "content": {
+                "extracted_text_full": (ai_input.get("content") or {}).get("extracted_text_full", "")
+            },
+        }
 
-    claim_types = scf_claim_type_choices(scf_path)
-    Schema = build_model(claim_types)
+        claim_types = scf_claim_type_choices(scf_path)
+        Schema = build_model(claim_types)
 
-    parsed, raw = call_openai_structured(args.model, Schema, user_input, args.reasoning_effort)
-    if parsed is None:
-        raw_path = outdir / (ai_path.stem.replace(".ai_input", "") + ".claims_response_raw.json")
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        raise RuntimeError(f"Parse failure/refusal. Raw: {raw_path}")
+        parsed, raw = call_openai_structured(args.model, Schema, user_input, args.reasoning_effort)
+        if parsed is None:
+            raw_path = outdir / (ai_path.stem.replace(".ai_input", "") + ".claims_response_raw.json")
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise RuntimeError(f"Parse failure/refusal. Raw: {raw_path}")
 
-    out = parsed.model_dump()
+        out = parsed.model_dump()
 
-    # Normalize + dedupe claim text
-    cleaned = []
-    seen = set()
-    for c in out.get("claims", []) or []:
-        ct = normalize_claim_text(c.get("claim_text", ""))
-        ctype = (c.get("claim_type") or "").strip()
-        if not ct:
-            continue
-        key = (ct, ctype)
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append({"claim_text": ct, "claim_type": ctype})
-    out = {"claims": cleaned}
+        # Normalize + dedupe claim text
+        cleaned = []
+        seen = set()
+        for c in out.get("claims", []) or []:
+            ct = normalize_claim_text(c.get("claim_text", ""))
+            ctype = (c.get("claim_type") or "").strip()
+            if not ct:
+                continue
+            key = (ct, ctype)
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append({"claim_text": ct, "claim_type": ctype})
+        out = {"claims": cleaned}
 
-    base = ai_path.stem.replace(".ai_input", "")
-    out_path = outdir / f"{base}.claims_parsed.json"
-    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    if args.write_raw:
-        raw_path = outdir / f"{base}.claims_response_raw.json"
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        base = ai_path.stem.replace(".ai_input", "")
+        out_path = outdir / f"{base}.claims_parsed.json"
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        if args.write_raw:
+            raw_path = outdir / f"{base}.claims_response_raw.json"
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"Wrote: {out_path}")
-    print(f"Claims: {len(out.get('claims', []))}")
-    return 0
+        log_event(
+            logger,
+            stage="claims_done",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"wrote={out_path} claims={len(out.get('claims', []))}",
+        )
+        return 0
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="claims_failed",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+        return 1
 
 if __name__ == "__main__":
     raise SystemExit(main())
