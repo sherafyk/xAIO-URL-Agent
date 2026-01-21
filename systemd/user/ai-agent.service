@@ -1,0 +1,8 @@
+[Unit]
+Description=AI Queue Agent (meta + claims + merge)
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/xAIO-URL-Agent
+ExecStart=/usr/bin/flock -n ./locks/ai.lock %h/xAIO-URL-Agent/venv/bin/python %h/xAIO-URL-Agent/src/ai_queue.py

@@ -27,10 +27,13 @@ columns_ai:
   ai_error: "K"
   meta_status: "L"
   meta_path: "M"
-  claims_status: "N"
-  claims_path: "O"
-  xaio_status: "P"
-  xaio_path: "Q"
+  meta_error: "N"
+  claims_status: "O"
+  claims_path: "P"
+  claims_error: "Q"
+  xaio_status: "R"
+  xaio_path: "S"
+  xaio_error: "T"
 
 agent:
   # Required: output locations for capture agent.
@@ -45,6 +48,10 @@ agent_ai:
   prompt_set_id: "xaio-v1-claims+scores"
   max_per_run: 50
 
+agent_ai_queue:
+  # Optional: settings for ai_queue.py (defaults shown).
+  max_per_run: 50
+
 fetch:
   # Optional: fetch behavior and browser settings.
   try_http_first: true
@@ -56,6 +63,7 @@ fetch:
 
 ai:
   # Optional: model configuration for AI stages.
+  scf_export_path: "./scf-export-content.json"
   meta:
     model: "gpt-5-nano"
     reasoning_effort: "minimal"

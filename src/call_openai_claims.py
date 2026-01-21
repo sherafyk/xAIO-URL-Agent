@@ -5,7 +5,10 @@ Reads *.ai_input.json (with extracted_text_full) + meta_parsed.json and outputs 
 """
 
 from __future__ import annotations
-import argparse, json, re
+
+import argparse
+import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -47,7 +50,6 @@ def build_model(claim_types: List[str]) -> Type[BaseModel]:
         claim_type: str = Field(..., description=f"One of: {claim_types}")
 
     class ClaimsParsed(BaseModel):
-        canonical_url: str
         claims: List[Claim] = Field(default_factory=list)
 
     return ClaimsParsed
@@ -102,7 +104,7 @@ def main() -> int:
 
     canon = (((ai_input.get("url") or {}).get("clean") or {}).get("canonical")
              or (ai_input.get("url") or {}).get("final")
-             or (ai_input.get("url") or {}).get("original")
+             or (ai_input.get("url") or {}).get("original"))
 
     user_input = {
       "canonical_url": canon,
@@ -116,7 +118,7 @@ def main() -> int:
     claim_types = scf_claim_type_choices(scf_path)
     Schema = build_model(claim_types)
 
-    parsed, raw = call_openai_structured(args.model, Schema, claims_input, args.reasoning_effort)
+    parsed, raw = call_openai_structured(args.model, Schema, user_input, args.reasoning_effort)
     if parsed is None:
         raw_path = outdir / (ai_path.stem.replace(".ai_input", "") + ".claims_response_raw.json")
         raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -124,14 +126,20 @@ def main() -> int:
 
     out = parsed.model_dump()
 
-    # Normalize claim text
+    # Normalize + dedupe claim text
     cleaned = []
+    seen = set()
     for c in out.get("claims", []) or []:
         ct = normalize_claim_text(c.get("claim_text", ""))
-        if ct:
-            c["claim_text"] = ct
-            cleaned.append(c)
-    out["claims"] = cleaned
+        ctype = (c.get("claim_type") or "").strip()
+        if not ct:
+            continue
+        key = (ct, ctype)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({"claim_text": ct, "claim_type": ctype})
+    out = {"claims": cleaned}
 
     base = ai_path.stem.replace(".ai_input", "")
     out_path = outdir / f"{base}.claims_parsed.json"
@@ -146,4 +154,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
