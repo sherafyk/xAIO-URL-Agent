@@ -1,0 +1,36 @@
+# --- Secrets / credentials ---
+secrets/
+*.env
+.env
+
+# --- Local config (committed template is config/config.example.yaml) ---
+config.yaml
+
+# --- Python / venv ---
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.build/
+dist/
+
+# --- Local databases / runtime ---
+agent.db
+*.log
+locks/
+
+# --- Generated outputs ---
+out/
+out_ai/
+out_ai_meta/
+out_meta/
+out_claims/
+out_xaio/
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

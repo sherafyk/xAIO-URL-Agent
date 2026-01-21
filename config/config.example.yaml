@@ -1,6 +1,6 @@
 sheet:
-  spreadsheet_url: ""
-  worksheet_name: ""
+  spreadsheet_url: "https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit"
+  worksheet_name: "Sheet1"
   header_row: 1
   first_data_row: 2
 
@@ -33,5 +33,5 @@ columns_ai:
 
 agent_ai:
   out_ai_dir: "./out_ai"
-  prompt_set_id: "xaio-v1-claims+scores"
+  prompt_set_id: "xaio-v1
   max_per_run: 50
