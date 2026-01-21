@@ -1,0 +1,12 @@
+[Unit]
+Description=Brave Agent (remote debugging for URL agent)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/brave-browser-beta --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=%h/.config/brave-agent-profile --no-first-run --no-default-browser-check
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Condense URL Agent (make AI-ready envelope JSON)
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/url-agent
+ExecStart=/usr/bin/flock -n %h/url-agent/locks/condense.lock %h/url-agent/venv/bin/python %h/url-agent/condense_queue.py
