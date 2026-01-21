@@ -4,12 +4,18 @@ merge_xaio.py
 Merges meta_parsed.json + claims_parsed.json + ai_input.json into final *.xaio_parsed.json
 """
 
-import argparse, json
+import argparse
+import json
 from pathlib import Path
 from typing import Any, Dict
 
 def load_json(p: Path) -> Any:
     return json.loads(p.read_text(encoding="utf-8"))
+
+def require_meta_fields(meta: Dict[str, Any], fields: list[str]) -> None:
+    missing = [field for field in fields if field not in meta]
+    if missing:
+        raise ValueError(f"meta_parsed missing required fields: {', '.join(missing)}")
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -29,9 +35,24 @@ def main() -> int:
     meta: Dict[str, Any] = load_json(meta_path)
     claims: Dict[str, Any] = load_json(claims_path)
 
+    require_meta_fields(meta, ["canonical_url", "domain", "site_name"])
+
     out: Dict[str, Any] = {}
     out.update(meta)
     out["claims"] = claims.get("claims", [])
+
+    url = ai_input.get("url", {}) if isinstance(ai_input.get("url"), dict) else {}
+    meta_block = ai_input.get("meta", {}) if isinstance(ai_input.get("meta"), dict) else {}
+
+    out["canonical_url"] = (
+        meta.get("canonical_url")
+        or (url.get("clean") or {}).get("canonical")
+        or url.get("final")
+        or url.get("original")
+        or ""
+    )
+    out["domain"] = meta.get("domain") or url.get("domain") or ""
+    out["site_name"] = meta.get("site_name") or meta_block.get("site_name") or ""
 
     # Always inject verbatim full text + counts from capture
     content = ai_input.get("content", {}) if isinstance(ai_input.get("content"), dict) else {}
@@ -52,4 +73,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
