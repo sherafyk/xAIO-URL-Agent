@@ -34,3 +34,9 @@ out_xaio/
 Thumbs.db
 .idea/
 .vscode/
+
+# --- Additional --- 
+.pytest_cache/
+.ruff_cache/
+out_*/**
+*.response_raw.json
