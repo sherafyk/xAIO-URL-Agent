@@ -1,5 +1,5 @@
 sheet:
-  spreadsheet_url: "https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit"
+  spreadsheet_url: "https://docs.google.com/spreadsheets/d/<ID>/edit"
   worksheet_name: "Sheet1"
   header_row: 1
   first_data_row: 2
@@ -14,24 +14,46 @@ columns:
   title: "G"
   error: "H"
 
-agent:
-  output_dir: "./out"
+columns_ai:
+  ai_status: "I"
+  ai_input_path: "J"
+  ai_error: "K"
+  meta_status: "L"
+  meta_path: "M"
+  claims_status: "N"
+  claims_path: "O"
+  xaio_status: "P"
+  xaio_path: "Q"
+
+paths:
+  out_capture_dir: "./out"
+  out_ai_dir: "./out_ai"
+  out_ai_meta_dir: "./out_ai_meta"
+  out_meta_dir: "./out_meta"
+  out_claims_dir: "./out_claims"
+  out_xaio_dir: "./out_xaio"
+  locks_dir: "./locks"
   sqlite_path: "./agent.db"
+  secrets_dir: "./secrets"
+
+agent:
   max_per_run: 50
 
 fetch:
   try_http_first: true
   http_timeout_s: 20
+  user_agent: "Mozilla/5.0 ..."
   browser_cdp_endpoint: "http://127.0.0.1:9222"
   browser_nav_timeout_ms: 30000
   browser_wait_after_load_ms: 1500
 
-columns_ai:
-  ai_status: "I"
-  ai_input_path: "J"
-  ai_error: "K"
+ai:
+  meta:
+    model: "gpt-5-nano"
+    reasoning_effort: "minimal"
+  claims:
+    model: "gpt-5-nano"
+    reasoning_effort: "minimal"
 
-agent_ai:
-  out_ai_dir: "./out_ai"
-  prompt_set_id: "xaio-v1
-  max_per_run: 50
+identity:
+  overrides_path: "./config/identity_overrides.yaml"   # local optional
