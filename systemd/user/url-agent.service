@@ -1,0 +1,11 @@
+[Unit]
+Description=URL Agent (poll sheet, fetch pages, save JSON)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/url-agent
+ExecStart=%h/url-agent/venv/bin/python %h/url-agent/agent.py
+
+[Unit]
+Wants=brave-agent.service
+After=brave-agent.service
