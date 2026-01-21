@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,8 +26,18 @@ from typing import Dict, List, Optional
 
 import gspread
 import yaml
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from strip_content_for_meta import load_json, write_meta_input
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("ai_queue")
 
 
 def now_iso() -> str:
@@ -60,6 +72,32 @@ def open_worksheet(gc: gspread.Client, spreadsheet_url: str, worksheet_name: str
 def update_cells(wks, row: int, updates: Dict[str, str]) -> None:
     for col, val in updates.items():
         wks.update_acell(cell_addr(col, row), val)
+
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def update_cells_with_retry(wks, row: int, updates: Dict[str, str]) -> None:
+    update_cells(wks, row, updates)
+
+
+def safe_update_cells(wks, row: int, updates: Dict[str, str], *, item_id: str, url: str) -> None:
+    try:
+        update_cells_with_retry(wks, row, updates)
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="sheet_update_failed",
+            item_id=item_id,
+            row=row,
+            url=url,
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
 
 
 def sha_marker_path(path: Path) -> Path:
@@ -275,6 +313,8 @@ def main() -> int:
     out_xaio_dir = Path(cfg.out_xaio_dir).expanduser().resolve()
     out_xaio_dir.mkdir(parents=True, exist_ok=True)
 
+    log_event(logger, stage="run_start", message="ai queue starting")
+
     for rownum in range(cfg.first_data_row, len(all_vals) + 1):
         row = all_vals[rownum - 1]
         url = safe(row[idx_url] if idx_url < len(row) else "")
@@ -291,24 +331,27 @@ def main() -> int:
             break
 
         if not ai_input_path_val:
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_ai_status: "AI_FAILED",
                 cfg.col_ai_error: "Missing ai_input_path.",
-            })
+            }, item_id=f"row-{rownum}", url=url)
             continue
 
         ai_input_path = Path(ai_input_path_val).expanduser().resolve()
         if not ai_input_path.exists():
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_ai_status: "AI_FAILED",
                 cfg.col_ai_error: f"ai_input not found: {ai_input_path}",
-            })
+            }, item_id=f"row-{rownum}", url=url)
             continue
 
         ai_input = load_json(ai_input_path)
         sha = content_sha(ai_input)
 
         base = ai_input_path.stem.replace(".ai_input", "")
+        item_id = base or f"row-{rownum}"
+        row_start = time.monotonic()
+        log_event(logger, stage="row_start", item_id=item_id, row=rownum, url=url)
         meta_input_path = ensure_meta_input(ai_input, ai_input_path, out_ai_meta_dir)
         meta_parsed_path = out_meta_dir / f"{base}.meta_parsed.json"
         claims_parsed_path = out_claims_dir / f"{base}.claims_parsed.json"
@@ -318,73 +361,110 @@ def main() -> int:
             continue
 
         if meta_status != "META_DONE" or not should_skip_stage(meta_parsed_path, sha):
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_meta_status: "META_RUNNING",
                 cfg.col_meta_error: "",
                 cfg.col_meta_path: str(meta_parsed_path),
-            })
+            }, item_id=item_id, url=url)
             res = run_call_openai_meta(meta_input_path, cfg)
             if res.returncode != 0:
                 err = (res.stderr or res.stdout or "").strip()
-                update_cells(wks, rownum, {
+                safe_update_cells(wks, rownum, {
                     cfg.col_meta_status: "META_FAILED",
                     cfg.col_meta_error: err[:49000],
-                })
+                }, item_id=item_id, url=url)
+                log_event(
+                    logger,
+                    stage="meta_failed",
+                    item_id=item_id,
+                    row=rownum,
+                    url=url,
+                    elapsed_ms_value=elapsed_ms(row_start),
+                    message=err,
+                    level=logging.ERROR,
+                )
                 continue
             mark_stage(meta_parsed_path, sha)
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_meta_status: "META_DONE",
                 cfg.col_meta_path: str(meta_parsed_path),
                 cfg.col_meta_error: "",
-            })
+            }, item_id=item_id, url=url)
 
         if claims_status != "CLAIMS_DONE" or not should_skip_stage(claims_parsed_path, sha):
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_claims_status: "CLAIMS_RUNNING",
                 cfg.col_claims_error: "",
                 cfg.col_claims_path: str(claims_parsed_path),
-            })
+            }, item_id=item_id, url=url)
             res = run_call_openai_claims(ai_input_path, meta_parsed_path, cfg)
             if res.returncode != 0:
                 err = (res.stderr or res.stdout or "").strip()
-                update_cells(wks, rownum, {
+                safe_update_cells(wks, rownum, {
                     cfg.col_claims_status: "CLAIMS_FAILED",
                     cfg.col_claims_error: err[:49000],
-                })
+                }, item_id=item_id, url=url)
+                log_event(
+                    logger,
+                    stage="claims_failed",
+                    item_id=item_id,
+                    row=rownum,
+                    url=url,
+                    elapsed_ms_value=elapsed_ms(row_start),
+                    message=err,
+                    level=logging.ERROR,
+                )
                 continue
             mark_stage(claims_parsed_path, sha)
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_claims_status: "CLAIMS_DONE",
                 cfg.col_claims_path: str(claims_parsed_path),
                 cfg.col_claims_error: "",
-            })
+            }, item_id=item_id, url=url)
 
         if xaio_status != "XAIO_DONE" or not should_skip_stage(xaio_parsed_path, sha):
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_xaio_status: "XAIO_RUNNING",
                 cfg.col_xaio_error: "",
                 cfg.col_xaio_path: str(xaio_parsed_path),
-            })
+            }, item_id=item_id, url=url)
             res = run_merge(ai_input_path, meta_parsed_path, claims_parsed_path, cfg)
             if res.returncode != 0:
                 err = (res.stderr or res.stdout or "").strip()
-                update_cells(wks, rownum, {
+                safe_update_cells(wks, rownum, {
                     cfg.col_xaio_status: "XAIO_FAILED",
                     cfg.col_xaio_error: err[:49000],
-                })
+                }, item_id=item_id, url=url)
+                log_event(
+                    logger,
+                    stage="xaio_failed",
+                    item_id=item_id,
+                    row=rownum,
+                    url=url,
+                    elapsed_ms_value=elapsed_ms(row_start),
+                    message=err,
+                    level=logging.ERROR,
+                )
                 continue
             mark_stage(xaio_parsed_path, sha)
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_xaio_status: "XAIO_DONE",
                 cfg.col_xaio_path: str(xaio_parsed_path),
                 cfg.col_xaio_error: "",
-            })
+            }, item_id=item_id, url=url)
 
         processed += 1
+        log_event(
+            logger,
+            stage="row_done",
+            item_id=item_id,
+            row=rownum,
+            url=url,
+            elapsed_ms_value=elapsed_ms(row_start),
+            message="ai queue complete",
+        )
 
-        print(f"[{now_iso()}] ai_queue processed row={rownum} url={url}")
-
-    print(f"[{now_iso()}] ai_queue complete; processed={processed}")
+    log_event(logger, stage="run_complete", message=f"processed={processed}")
     return 0
 
 

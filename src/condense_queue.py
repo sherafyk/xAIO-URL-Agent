@@ -14,8 +14,10 @@ This does NOT modify your existing capture JSON generation.
 from __future__ import annotations
 
 import argparse
+import logging
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,17 @@ from typing import Dict, List, Tuple
 
 import gspread
 import yaml
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("condense_queue")
 
 
 def now_iso() -> str:
@@ -58,6 +71,32 @@ def update_cells(wks, row: int, updates: Dict[str, str]) -> None:
     # small volume; cell-by-cell is fine for v1
     for col, val in updates.items():
         wks.update_acell(cell_addr(col, row), val)
+
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def update_cells_with_retry(wks, row: int, updates: Dict[str, str]) -> None:
+    update_cells(wks, row, updates)
+
+
+def safe_update_cells(wks, row: int, updates: Dict[str, str], *, item_id: str, url: str) -> None:
+    try:
+        update_cells_with_retry(wks, row, updates)
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="sheet_update_failed",
+            item_id=item_id,
+            row=row,
+            url=url,
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
 
 
 @dataclass
@@ -173,8 +212,11 @@ def main() -> int:
     idx_status = col_letter_to_index(cfg.col_status)
     idx_json = col_letter_to_index(cfg.col_json_path)
     idx_ai_status = col_letter_to_index(cfg.col_ai_status)
+    idx_url = col_letter_to_index(cfg.col_url)
 
     processed = 0
+
+    log_event(logger, stage="run_start", message="condense run starting")
 
     for rownum in range(cfg.first_data_row, len(all_vals) + 1):
         row = all_vals[rownum - 1]
@@ -182,6 +224,8 @@ def main() -> int:
         status = safe(row[idx_status] if idx_status < len(row) else "").upper()
         ai_status = safe(row[idx_ai_status] if idx_ai_status < len(row) else "").upper()
         json_path = safe(row[idx_json] if idx_json < len(row) else "")
+        url = safe(row[idx_url] if idx_url < len(row) else "")
+        item_id = Path(json_path).stem if json_path else f"row-{rownum}"
 
         if status != "DONE":
             continue
@@ -189,38 +233,60 @@ def main() -> int:
             continue
         if not json_path:
             # capture missing path: mark failed for visibility
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_ai_status: "AI_FAILED",
                 cfg.col_ai_error: "Missing json_path (col F).",
-            })
+            }, item_id=item_id, url=url)
             continue
 
         if processed >= cfg.max_per_run:
             break
 
+        row_start = time.monotonic()
+        log_event(logger, stage="row_start", item_id=item_id, row=rownum, url=url)
+
         # Claim row for condensing
-        update_cells(wks, rownum, {
+        safe_update_cells(wks, rownum, {
             cfg.col_ai_status: "CONDENSING",
             cfg.col_ai_error: "",
-        })
+        }, item_id=item_id, url=url)
 
         ok, msg = run_reduce4ai(json_path, cfg.out_ai_dir, cfg.prompt_set_id)
 
         if ok:
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_ai_status: "AI_READY",
                 cfg.col_ai_input_path: msg,
                 cfg.col_ai_error: "",
-            })
+            }, item_id=item_id, url=url)
+            log_event(
+                logger,
+                stage="row_done",
+                item_id=item_id,
+                row=rownum,
+                url=url,
+                elapsed_ms_value=elapsed_ms(row_start),
+                message="condense complete",
+            )
         else:
-            update_cells(wks, rownum, {
+            safe_update_cells(wks, rownum, {
                 cfg.col_ai_status: "AI_FAILED",
                 cfg.col_ai_error: msg[:49000],
-            })
+            }, item_id=item_id, url=url)
+            log_event(
+                logger,
+                stage="row_failed",
+                item_id=item_id,
+                row=rownum,
+                url=url,
+                elapsed_ms_value=elapsed_ms(row_start),
+                message=msg,
+                level=logging.ERROR,
+            )
 
         processed += 1
 
-    print(f"[{now_iso()}] condense_queue complete; processed={processed}")
+    log_event(logger, stage="run_complete", message=f"processed={processed}")
     return 0
 
 

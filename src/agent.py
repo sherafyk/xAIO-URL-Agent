@@ -1,6 +1,6 @@
 import hashlib
 import json
-import os
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -15,7 +15,17 @@ from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 from readability import Document
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("agent")
 
 
 # ---------- utils ----------
@@ -281,6 +291,32 @@ def update_row(wks, row: int, updates: Dict[str, str]) -> None:
         wks.update_acell(cell_addr(col, row), val)
 
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def update_row_with_retry(wks, row: int, updates: Dict[str, str]) -> None:
+    update_row(wks, row, updates)
+
+
+def safe_update_row(wks, row: int, updates: Dict[str, str], *, item_id: str, url: str) -> None:
+    try:
+        update_row_with_retry(wks, row, updates)
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="sheet_update_failed",
+            item_id=item_id,
+            row=row,
+            url=url,
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+
+
 # ---------- main loop (one timer run) ----------
 
 def run_once(cfg: Config) -> None:
@@ -298,6 +334,8 @@ def run_once(cfg: Config) -> None:
 
     processed = 0
     browser_holder: Dict[str, Any] = {}
+
+    log_event(logger, stage="run_start", message="capture run starting")
 
     with sync_playwright() as pw:
         browser_holder["pw"] = pw
@@ -321,19 +359,22 @@ def run_once(cfg: Config) -> None:
             seen = db_seen(conn, uhash)
             if seen and seen["status"] == "DONE":
                 # keep sheet consistent if someone cleared status
-                update_row(wks, sheet_row_idx, {
+                safe_update_row(wks, sheet_row_idx, {
                     cfg.col_status: "DONE",
                     cfg.col_processed_at: seen.get("processed_at") or "",
                     cfg.col_json_path: seen.get("json_path") or "",
-                })
+                }, item_id=uhash, url=url)
                 continue
 
+            row_start = time.monotonic()
+            log_event(logger, stage="row_start", item_id=uhash, row=sheet_row_idx, url=url)
+
             # claim
-            update_row(wks, sheet_row_idx, {
+            safe_update_row(wks, sheet_row_idx, {
                 cfg.col_status: "FETCHING",
                 cfg.col_processed_at: now_iso(),
                 cfg.col_error: "",
-            })
+            }, item_id=uhash, url=url)
             db_upsert_start(conn, url, uhash)
 
             try:
@@ -390,7 +431,7 @@ def run_once(cfg: Config) -> None:
                 title = safe_str(payload["page"].get("title", ""))
 
                 db_finish(conn, uhash, status="DONE", url_final=final_url, method=method, json_path=str(out_path))
-                update_row(wks, sheet_row_idx, {
+                safe_update_row(wks, sheet_row_idx, {
                     cfg.col_status: "DONE",
                     cfg.col_processed_at: now_iso(),
                     cfg.col_final_url: final_url,
@@ -398,18 +439,37 @@ def run_once(cfg: Config) -> None:
                     cfg.col_json_path: str(out_path),
                     cfg.col_title: title,
                     cfg.col_error: "",
-                })
+                }, item_id=uhash, url=final_url)
 
                 processed += 1
+                log_event(
+                    logger,
+                    stage="row_done",
+                    item_id=uhash,
+                    row=sheet_row_idx,
+                    url=final_url,
+                    elapsed_ms_value=elapsed_ms(row_start),
+                    message=f"method={method}",
+                )
 
             except (PWTimeoutError, Exception) as e:
                 err = f"{type(e).__name__}: {str(e)}"
                 db_finish(conn, uhash, status="FAILED", error=err)
-                update_row(wks, sheet_row_idx, {
+                safe_update_row(wks, sheet_row_idx, {
                     cfg.col_status: "FAILED",
                     cfg.col_processed_at: now_iso(),
                     cfg.col_error: err[:49000],  # keep under cell limits
-                })
+                }, item_id=uhash, url=url)
+                log_event(
+                    logger,
+                    stage="row_failed",
+                    item_id=uhash,
+                    row=sheet_row_idx,
+                    url=url,
+                    elapsed_ms_value=elapsed_ms(row_start),
+                    message=err,
+                    level=logging.ERROR,
+                )
 
         # Disconnect cleanly: for connected browsers, Playwright documents that browser.close()
         # “disconnects from the browser server” (vs killing the browser). :contentReference[oaicite:6]{index=6}
@@ -419,9 +479,10 @@ def run_once(cfg: Config) -> None:
             except Exception:
                 pass
 
+    log_event(logger, stage="run_complete", message=f"processed={processed}")
+
 
 if __name__ == "__main__":
     cfg = load_config("config.yaml")
     run_once(cfg)
-    print(f"[{now_iso()}] run complete")
-
+    log_event(logger, stage="exit", message="run complete")

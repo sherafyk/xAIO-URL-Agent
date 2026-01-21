@@ -25,12 +25,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from openai import OpenAI
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("call_openai_parse")
 
 
 # ---------------------------
@@ -205,6 +218,13 @@ Rules:
 - Scores are about clarity/traceability/structure (not truth).
 """
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError, APIError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 def call_openai_structured(
     model: str,
     xaio_model: Type[BaseModel],
@@ -307,37 +327,57 @@ def main() -> int:
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    ai_input = load_json(ai_input_path)
-    enums = scf_enums_from_export(scf_path)
+    item_id = ai_input_path.stem.replace(".ai_input", "")
+    start_time = time.monotonic()
+    log_event(logger, stage="parse_start", item_id=item_id, message="parse starting")
 
-    _, XAIOParsed = build_models(enums)
+    try:
+        ai_input = load_json(ai_input_path)
+        enums = scf_enums_from_export(scf_path)
 
-    parsed_obj, raw = call_openai_structured(
-        model=args.model,
-        xaio_model=XAIOParsed,
-        ai_input=ai_input,
-        reasoning_effort=args.reasoning_effort if args.reasoning_effort else None,
-    )
+        _, XAIOParsed = build_models(enums)
 
-    # If the model refused, parsed_obj may be None
-    if parsed_obj is None:
-        raw_path = outdir / (ai_input_path.stem.replace(".ai_input", "") + ".xaio_response_raw.json")
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        raise RuntimeError("Model refusal or parse failure. Wrote raw response for inspection:\n" + str(raw_path))
+        parsed_obj, raw = call_openai_structured(
+            model=args.model,
+            xaio_model=XAIOParsed,
+            ai_input=ai_input,
+            reasoning_effort=args.reasoning_effort if args.reasoning_effort else None,
+        )
 
-    out = postprocess(parsed_obj, ai_input)
+        # If the model refused, parsed_obj may be None
+        if parsed_obj is None:
+            raw_path = outdir / (ai_input_path.stem.replace(".ai_input", "") + ".xaio_response_raw.json")
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise RuntimeError("Model refusal or parse failure. Wrote raw response for inspection:\n" + str(raw_path))
 
-    base = ai_input_path.stem.replace(".ai_input", "")
-    out_path = outdir / f"{base}.xaio_parsed.json"
-    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        out = postprocess(parsed_obj, ai_input)
 
-    if args.write_raw:
-        raw_path = outdir / f"{base}.xaio_response_raw.json"
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        base = ai_input_path.stem.replace(".ai_input", "")
+        out_path = outdir / f"{base}.xaio_parsed.json"
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"Wrote: {out_path}")
-    print(f"Claims: {len(out.get('claims', []))}")
-    return 0
+        if args.write_raw:
+            raw_path = outdir / f"{base}.xaio_response_raw.json"
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        log_event(
+            logger,
+            stage="parse_done",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"wrote={out_path} claims={len(out.get('claims', []))}",
+        )
+        return 0
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="parse_failed",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+        return 1
 
 
 if __name__ == "__main__":

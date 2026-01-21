@@ -5,12 +5,26 @@ Calls OpenAI Structured Outputs to parse META fields using ai_input without body
 """
 
 from __future__ import annotations
-import argparse, json
+import argparse
+import json
+import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from openai import OpenAI
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("call_openai_meta")
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -75,6 +89,13 @@ Rules:
 - language must be one of the allowed values or null.
 """
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError, APIError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 def call_openai_structured(model: str, schema: Type[BaseModel], meta_input: Dict[str, Any], reasoning_effort: Optional[str]) -> Tuple[Optional[BaseModel], Dict[str, Any]]:
     client = OpenAI()
     req: Dict[str, Any] = dict(
@@ -137,28 +158,48 @@ def main() -> int:
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    meta_input = load_json(meta_path)
-    enums = scf_enums_from_export(scf_path)
-    MetaSchema = build_model(enums)
+    item_id = meta_path.stem.replace(".meta_input", "")
+    start_time = time.monotonic()
+    log_event(logger, stage="meta_start", item_id=item_id, message="meta parse starting")
 
-    parsed, raw = call_openai_structured(args.model, MetaSchema, meta_input, args.reasoning_effort)
-    if parsed is None:
-        raw_path = outdir / (meta_path.stem.replace(".meta_input", "") + ".meta_response_raw.json")
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        raise RuntimeError(f"Parse failure/refusal. Raw: {raw_path}")
+    try:
+        meta_input = load_json(meta_path)
+        enums = scf_enums_from_export(scf_path)
+        MetaSchema = build_model(enums)
 
-    out = postprocess(parsed.model_dump(), meta_input)
+        parsed, raw = call_openai_structured(args.model, MetaSchema, meta_input, args.reasoning_effort)
+        if parsed is None:
+            raw_path = outdir / (meta_path.stem.replace(".meta_input", "") + ".meta_response_raw.json")
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise RuntimeError(f"Parse failure/refusal. Raw: {raw_path}")
 
-    base = meta_path.stem.replace(".meta_input", "")
-    out_path = outdir / f"{base}.meta_parsed.json"
-    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    if args.write_raw:
-        raw_path = outdir / f"{base}.meta_response_raw.json"
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        out = postprocess(parsed.model_dump(), meta_input)
 
-    print(f"Wrote: {out_path}")
-    return 0
+        base = meta_path.stem.replace(".meta_input", "")
+        out_path = outdir / f"{base}.meta_parsed.json"
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        if args.write_raw:
+            raw_path = outdir / f"{base}.meta_response_raw.json"
+            raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        log_event(
+            logger,
+            stage="meta_done",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"wrote={out_path}",
+        )
+        return 0
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="meta_failed",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+        return 1
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

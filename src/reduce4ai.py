@@ -22,13 +22,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("reduce4ai")
 
 # ---------------------------
 # helpers
@@ -306,33 +310,53 @@ def main() -> int:
     args = ap.parse_args()
 
     capture_path = Path(args.capture_json).expanduser().resolve()
-    if not capture_path.exists():
-        raise FileNotFoundError(f"Capture JSON not found: {capture_path}")
+    item_id = capture_path.stem
+    start_time = time.monotonic()
+    log_event(logger, stage="reduce_start", item_id=item_id, message="reduce starting")
 
-    outdir = Path(args.outdir).expanduser().resolve()
-    ensure_dir(outdir)
+    try:
+        if not capture_path.exists():
+            raise FileNotFoundError(f"Capture JSON not found: {capture_path}")
 
-    include_meta_keys = tuple([k.strip() for k in args.meta_keys.split(",") if k.strip()])
+        outdir = Path(args.outdir).expanduser().resolve()
+        ensure_dir(outdir)
 
-    with capture_path.open("r", encoding="utf-8") as f:
-        capture = json.load(f)
+        include_meta_keys = tuple([k.strip() for k in args.meta_keys.split(",") if k.strip()])
 
-    envelope = build_ai_envelope(
-        capture_path=capture_path,
-        capture=capture,
-        prompt_set_id=args.prompt_set_id,
-        include_meta_keys=include_meta_keys,
-    )
+        with capture_path.open("r", encoding="utf-8") as f:
+            capture = json.load(f)
 
-    # Write output next to outdir; name derived from capture name
-    out_name = capture_path.stem + ".ai_input.json"
-    out_path = outdir / out_name
-    out_path.write_text(json.dumps(envelope, ensure_ascii=False, indent=2), encoding="utf-8")
+        envelope = build_ai_envelope(
+            capture_path=capture_path,
+            capture=capture,
+            prompt_set_id=args.prompt_set_id,
+            include_meta_keys=include_meta_keys,
+        )
 
-    print(f"Wrote AI envelope: {out_path}")
-    print(f"  text chars: {envelope['content']['char_count']}, words: {envelope['content']['word_count']}")
-    print(f"  domain: {envelope['url']['domain']}")
-    return 0
+        # Write output next to outdir; name derived from capture name
+        out_name = capture_path.stem + ".ai_input.json"
+        out_path = outdir / out_name
+        out_path.write_text(json.dumps(envelope, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        log_event(
+            logger,
+            stage="reduce_done",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"wrote={out_path} chars={envelope['content']['char_count']} words={envelope['content']['word_count']}",
+            domain=envelope["url"]["domain"],
+        )
+        return 0
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="reduce_failed",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+        return 1
 
 
 if __name__ == "__main__":
