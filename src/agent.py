@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import gspread
 import requests
@@ -179,6 +179,8 @@ def extract_meta_and_text(full_html: str, final_url: str) -> Dict[str, Any]:
         if link and link.get("href"):
             canonical = link["href"].strip()
 
+    jsonld_extracted = extract_jsonld_candidates(soup)
+
     # readability main content
     doc = Document(full_html)
     readable_title = safe_str(doc.short_title())
@@ -211,10 +213,93 @@ def extract_meta_and_text(full_html: str, final_url: str) -> Dict[str, Any]:
             "description": description,
             "published_at": published_at,
             "meta": meta,
+            "jsonld_extracted": jsonld_extracted,
         },
         "content": {
             "text": main_text,
         }
+    }
+
+
+def extract_jsonld_candidates(soup: BeautifulSoup) -> Dict[str, List[str]]:
+    scripts = soup.find_all("script", attrs={"type": lambda x: isinstance(x, str) and "ld+json" in x.lower()})
+    parsed_items: List[Any] = []
+    for script in scripts:
+        if not script.string:
+            continue
+        raw = script.string.strip()
+        if not raw:
+            continue
+        try:
+            parsed_items.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+
+    org_names: List[str] = []
+    author_names: List[str] = []
+    date_published: List[str] = []
+    date_modified: List[str] = []
+
+    org_seen: set[str] = set()
+    author_seen: set[str] = set()
+    published_seen: set[str] = set()
+    modified_seen: set[str] = set()
+
+    def add_name(value: Any, target: List[str], seen: set[str]) -> None:
+        if isinstance(value, list):
+            for item in value:
+                add_name(item, target, seen)
+            return
+        if isinstance(value, dict):
+            name = value.get("name") or value.get("legalName")
+            if isinstance(name, str):
+                add_name(name, target, seen)
+            return
+        if isinstance(value, str):
+            name = value.strip()
+            if name and name not in seen:
+                target.append(name)
+                seen.add(name)
+
+    def add_date(value: Any, target: List[str], seen: set[str]) -> None:
+        if isinstance(value, list):
+            for item in value:
+                add_date(item, target, seen)
+            return
+        if isinstance(value, str):
+            date_str = value.strip()
+            if date_str and date_str not in seen:
+                target.append(date_str)
+                seen.add(date_str)
+
+    def iter_nodes(obj: Any) -> Iterable[Dict[str, Any]]:
+        if isinstance(obj, dict):
+            yield obj
+            graph = obj.get("@graph")
+            if graph is not None:
+                yield from iter_nodes(graph)
+            for val in obj.values():
+                yield from iter_nodes(val)
+        elif isinstance(obj, list):
+            for item in obj:
+                yield from iter_nodes(item)
+
+    for item in parsed_items:
+        for node in iter_nodes(item):
+            if "publisher" in node:
+                add_name(node.get("publisher"), org_names, org_seen)
+            if "author" in node:
+                add_name(node.get("author"), author_names, author_seen)
+            if "datePublished" in node:
+                add_date(node.get("datePublished"), date_published, published_seen)
+            if "dateModified" in node:
+                add_date(node.get("dateModified"), date_modified, modified_seen)
+
+    return {
+        "publisher_names": org_names,
+        "author_names": author_names,
+        "date_published": date_published,
+        "date_modified": date_modified,
     }
 
 

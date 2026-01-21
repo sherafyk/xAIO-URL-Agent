@@ -104,6 +104,18 @@ def domain_of(url: str) -> str:
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
+def unique_strings(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            val = item.strip()
+            if val and val not in seen:
+                out.append(val)
+                seen.add(val)
+    return out
 
 # ---------------------------
 # core extraction from capture JSON
@@ -243,6 +255,14 @@ def build_ai_envelope(
             if isinstance(v, str) and v.strip():
                 meta_whitelist[k] = v.strip()
 
+    jsonld_extracted = get_nested(capture, "page.jsonld_extracted") or {}
+    identity_candidates = {
+        "organization_names": unique_strings(jsonld_extracted.get("publisher_names")),
+        "author_names": unique_strings(jsonld_extracted.get("author_names")),
+        "date_published": unique_strings(jsonld_extracted.get("date_published")),
+        "date_modified": unique_strings(jsonld_extracted.get("date_modified")),
+    }
+
     # Create a stable ID for traceability
     capture_id = f"{capture_path.name}__textsha:{text_sha[:12] if text_sha else 'no_text'}"
 
@@ -272,6 +292,7 @@ def build_ai_envelope(
             "author_hint": sig.author_hint,
             "fetch_method": sig.fetch_method,
             "meta_whitelist": meta_whitelist,  # small optional subset
+            "identity_candidates": identity_candidates,
         },
         "content": {
             # FULL TEXT (verbatim) — per your requirement
