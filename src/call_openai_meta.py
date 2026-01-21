@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type
 
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
@@ -65,6 +65,14 @@ def build_model(enums: Dict[str, List[str]]) -> Type[BaseModel]:
         # SCF fields you said you want filled
         domain: Optional[str] = None
         site_name: Optional[str] = None
+        organization_name: Optional[str] = Field(
+            None,
+            description="Organization/publisher name from identity candidates, else null.",
+        )
+        author_names: Optional[List[str]] = Field(
+            None,
+            description="Author names from identity candidates, else null.",
+        )
         published_at: Optional[str] = Field(None, description="ISO 8601 when available, else null.")
         modified_time: Optional[str] = Field(None, description="ISO 8601 when available, else null.")
         collected_at_utc: Optional[str] = Field(None, description="ISO 8601 when available, else null.")
@@ -84,6 +92,7 @@ Do not include markdown, commentary, or extra keys.
 Rules:
 - Do NOT analyze or infer from any full article body (it is intentionally absent).
 - Use only the provided URL + HEAD/metadata fields in the input JSON.
+- For organization_name and author_names, choose only from meta.identity_candidates (or return null).
 - If a value is not present in metadata, return null.
 - content_mode must be one of the allowed values.
 - language must be one of the allowed values or null.
@@ -128,6 +137,10 @@ def postprocess(out: Dict[str, Any], meta_input: Dict[str, Any]) -> Dict[str, An
     mw = meta.get("meta_whitelist") or {}
     cap = meta_input.get("capture") or {}
     content = meta_input.get("content") or {}
+    identity = meta.get("identity_candidates") or {}
+
+    org_candidates = normalize_candidates(identity.get("organization_names"))
+    author_candidates = normalize_candidates(identity.get("author_names"))
 
     out["domain"] = url.get("domain") or out.get("domain")
     out["site_name"] = meta.get("site_name") or out.get("site_name")
@@ -141,7 +154,47 @@ def postprocess(out: Dict[str, Any], meta_input: Dict[str, Any]) -> Dict[str, An
     out["char_count"] = content.get("char_count") or out.get("char_count")
     out["word_count"] = content.get("word_count") or out.get("word_count")
 
+    out["organization_name"] = normalize_choice(out.get("organization_name"), org_candidates)
+    out["author_names"] = normalize_choice_list(out.get("author_names"), author_candidates)
+
     return out
+
+def normalize_candidates(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if isinstance(item, str):
+            val = item.strip()
+            if val and val not in seen:
+                out.append(val)
+                seen.add(val)
+    return out
+
+def normalize_choice(value: Any, candidates: Sequence[str]) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    val = value.strip()
+    if not val:
+        return None
+    return val if val in candidates else None
+
+def normalize_choice_list(value: Any, candidates: Sequence[str]) -> Optional[List[str]]:
+    if not isinstance(value, list):
+        return None
+    chosen: List[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        val = item.strip()
+        if not val or val in seen:
+            continue
+        if val in candidates:
+            chosen.append(val)
+            seen.add(val)
+    return chosen or None
 
 def main() -> int:
     ap = argparse.ArgumentParser()
