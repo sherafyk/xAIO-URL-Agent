@@ -1,0 +1,37 @@
+sheet:
+  spreadsheet_url: ""
+  worksheet_name: ""
+  header_row: 1
+  first_data_row: 2
+
+columns:
+  url: "A"
+  status: "B"
+  processed_at: "C"
+  final_url: "D"
+  method: "E"
+  json_path: "F"
+  title: "G"
+  error: "H"
+
+agent:
+  output_dir: "./out"
+  sqlite_path: "./agent.db"
+  max_per_run: 50
+
+fetch:
+  try_http_first: true
+  http_timeout_s: 20
+  browser_cdp_endpoint: "http://127.0.0.1:9222"
+  browser_nav_timeout_ms: 30000
+  browser_wait_after_load_ms: 1500
+
+columns_ai:
+  ai_status: "I"
+  ai_input_path: "J"
+  ai_error: "K"
+
+agent_ai:
+  out_ai_dir: "./out_ai"
+  prompt_set_id: "xaio-v1-claims+scores"
+  max_per_run: 50
