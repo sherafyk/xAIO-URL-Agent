@@ -35,7 +35,45 @@ Google Sheet (URL queue)
         ↓
 [merge_xaio.py]         ──▶ out_xaio/*.xaio_parsed.json
 ```
+### Recommended layout
 
+```
+xAIO-url-agent/
+├─ README.md
+├─ docs/
+│  ├─ architecture.md
+│  ├─ sheet-schema.md
+│  ├─ brave-cdp.md
+│  ├─ systemd.md
+│  └─ troubleshooting.md
+├─ src/
+│  ├─ agent.py
+│  ├─ reduce4ai.py
+│  ├─ condense_queue.py
+│  ├─ strip_content_for_meta.py
+│  ├─ call_openai_meta.py
+│  ├─ call_openai_claims.py
+│  └─ merge_xaio.py
+├─ config/
+│  ├─ config.example.yaml
+│  └─ scf-export-content.json
+├─ systemd/
+│  └─ user/
+│     ├─ url-agent.service
+│     ├─ url-agent.timer
+│     ├─ condense-agent.service
+│     └─ condense-agent.timer
+├─ scripts/
+│  ├─ bootstrap_ubuntu.sh
+│  ├─ install_systemd_user.sh
+│  ├─ brave_debug_launch.sh
+│  ├─ update_and_restart.sh
+│  └─ doctor.sh
+├─ .gitignore
+├─ requirements.txt
+└─ .env.example
+
+```
 ---
 
 ## 2. What This Project Is (and Is Not)
