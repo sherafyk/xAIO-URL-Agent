@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,9 +130,10 @@ def run_reduce4ai(capture_json_path: str, out_ai_dir: str, prompt_set_id: str) -
     outdir = Path(out_ai_dir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
+    reduce4ai_path = Path(__file__).resolve().parent / "reduce4ai.py"
     cmd = [
-        "python",
-        "reduce4ai.py",
+        sys.executable,
+        str(reduce4ai_path),
         str(capture_path),
         "--outdir",
         str(outdir),

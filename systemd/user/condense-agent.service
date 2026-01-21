@@ -4,5 +4,5 @@ After=default.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/url-agent
-ExecStart=/usr/bin/flock -n %h/url-agent/locks/condense.lock %h/url-agent/venv/bin/python %h/url-agent/condense_queue.py
+WorkingDirectory=%h/xAIO-URL-Agent
+ExecStart=/usr/bin/flock -n ./locks/condense.lock %h/xAIO-URL-Agent/venv/bin/python %h/xAIO-URL-Agent/src/condense_queue.py
