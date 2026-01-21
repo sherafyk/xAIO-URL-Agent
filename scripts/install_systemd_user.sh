@@ -8,11 +8,17 @@ DEST_DIR="$HOME/.config/systemd/user"
 mkdir -p "$DEST_DIR"
 
 echo "Installing user systemd units..."
-cp -v "$SRC_DIR"/*.service "$DEST_DIR"/
-cp -v "$SRC_DIR"/*.timer "$DEST_DIR"/
+shopt -s nullglob
+for unit in "$SRC_DIR"/*.service "$SRC_DIR"/*.timer; do
+  unit_name="$(basename "$unit")"
+  sed "s|%h/xAIO-URL-Agent|$PROJECT_DIR|g" "$unit" > "$DEST_DIR/$unit_name"
+  echo "Installed $unit_name"
+done
+shopt -u nullglob
 
 systemctl --user daemon-reload
 
 echo "Enable timers:"
 echo "  systemctl --user enable --now url-agent.timer"
 echo "  systemctl --user enable --now condense-agent.timer"
+echo "  systemctl --user enable --now ai-agent.timer"

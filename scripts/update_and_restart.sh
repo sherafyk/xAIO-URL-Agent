@@ -11,5 +11,6 @@ echo "Restarting timers (if installed)..."
 systemctl --user daemon-reload || true
 systemctl --user restart url-agent.timer 2>/dev/null || true
 systemctl --user restart condense-agent.timer 2>/dev/null || true
+systemctl --user restart ai-agent.timer 2>/dev/null || true
 
 echo "Done."
