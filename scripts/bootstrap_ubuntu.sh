@@ -1,17 +1,3 @@
-## `scripts/bootstrap_ubuntu.sh` ✅
-
-This script does exactly what you asked:
-
-- checks Python version
-- creates venv
-- installs requirements
-- creates required directories
-- copies config template → local config if missing
-- prints next steps (service account, OpenAI key, doctor)
-
-**File:** `scripts/bootstrap_ubuntu.sh`
-
-```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
