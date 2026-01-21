@@ -62,7 +62,9 @@ xAIO-url-agent/
 │     ├─ url-agent.service
 │     ├─ url-agent.timer
 │     ├─ condense-agent.service
-│     └─ condense-agent.timer
+│     ├─ condense-agent.timer
+│     ├─ ai-agent.service
+│     └─ ai-agent.timer
 ├─ scripts/
 │  ├─ bootstrap_ubuntu.sh
 │  ├─ install_systemd_user.sh
@@ -336,6 +338,15 @@ This file can be:
 
 * `url-agent.timer` → fetch & capture
 * `condense-agent.timer` → reduce & AI prep
+* `ai-agent.timer` → meta + claims + merge outputs
+
+### Enable (recommended)
+
+```bash
+systemctl --user enable --now url-agent.timer
+systemctl --user enable --now condense-agent.timer
+systemctl --user enable --now ai-agent.timer
+```
 
 ### Safety
 
