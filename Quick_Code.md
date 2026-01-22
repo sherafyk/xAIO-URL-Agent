@@ -43,11 +43,8 @@ possibly output dirs if something accidentally got tracked
 Some files (like `config.yaml` and `.env`) are supposed to be local-only and should never be committed.
 
 ```
-chmod +x scripts/update_and_restart.sh
-```
-
-```
-./scripts/update_and_restart.sh
+chmod +x scripts/update_and_restart.sh  
+./scripts/update_and_restart.sh  
 ```
 
 
