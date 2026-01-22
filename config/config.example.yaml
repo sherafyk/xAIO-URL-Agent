@@ -91,3 +91,25 @@ paths:
 identity:
   # Optional: path to local identity overrides.
   overrides_path: "./config/identity_overrides.yaml"
+
+wordpress:
+  base_url: "https://xaio.org"
+  ingest_path: "/wp-json/xaio/v1/ingest"
+
+  # The WP CPT slugs you already have
+  post_type_content: "content"
+  post_type_contributor: "contributor"
+  post_type_organization: "organization"
+
+  # Used to build the post payload
+  wp_post_status: "draft"
+
+  # Topics generation mode:
+  # - "simple": local keyword extraction (no extra API calls)
+  # - "openai": call OpenAI to generate topics
+  topics_mode: "simple"
+  topics_max: 8
+
+  # How many rows per run
+  max_per_run: 50
+
