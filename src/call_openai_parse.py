@@ -309,7 +309,7 @@ def main() -> int:
     ap.add_argument("--write-raw", action="store_true", help="Also write a *.xaio_response_raw.json debugging file")
     ap.add_argument("--model", default="gpt-5-nano", help="OpenAI model to use (default: gpt-5-nano)")
     ap.add_argument("--reasoning-effort", default="minimal", help="Reasoning effort for GPT-5 models (none|minimal|low|medium|high|xhigh).")
-    ap.add_argument("--scf-export", default="./scf-export-content.json", help="Path to SCF export JSON (for enum choices).")
+    ap.add_argument("--scf-export", default="config/scf-export-content.json", help="Path to SCF export JSON (for enum choices).")
 
     args = ap.parse_args()
 

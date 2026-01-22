@@ -199,7 +199,7 @@ def normalize_choice_list(value: Any, candidates: Sequence[str]) -> Optional[Lis
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("meta_input_json")
-    ap.add_argument("--scf-export", default="./scf-export-content.json")
+    ap.add_argument("--scf-export", default="config/scf-export-content.json")
     ap.add_argument("--outdir", default="./out_meta")
     ap.add_argument("--write-raw", action="store_true")
     ap.add_argument("--model", default="gpt-5-nano")

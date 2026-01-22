@@ -158,11 +158,10 @@ def load_config(path: str = "config.yaml") -> CondenseConfig:
 
 def run_reduce4ai(capture_json_path: str, out_ai_dir: str, prompt_set_id: str) -> Tuple[bool, str]:
     """
-    Calls reduce4ai.py as a subprocess (safe; avoids refactoring your working code).
-    Returns (success, message_or_output_path).
+    Calls reduce4ai.py as a subprocess.
+    Returns (success, output_path_or_error).
     """
     capture_path = Path(capture_json_path).expanduser()
-
     if not capture_path.exists():
         return False, f"capture json not found: {capture_path}"
 
@@ -171,30 +170,23 @@ def run_reduce4ai(capture_json_path: str, out_ai_dir: str, prompt_set_id: str) -
 
     reduce4ai_path = Path(__file__).resolve().parent / "reduce4ai.py"
     cmd = [
-        sys.executable,
-        str(reduce4ai_path),
-        str(capture_path),
-        "--outdir",
-        str(outdir),
-        "--prompt-set-id",
-        prompt_set_id,
+        sys.executable, str(reduce4ai_path), str(capture_path),
+        "--outdir", str(outdir),
+        "--prompt-set-id", prompt_set_id,
     ]
 
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if res.returncode != 0:
-            err = (res.stderr or res.stdout or "").strip()
-            return False, f"reduce4ai failed: {err[:2000]}"
-        # reduce4ai prints "Wrote AI envelope: <path>"
-        out_text = (res.stdout or "").strip().splitlines()
-        out_path = ""
-        for line in out_text:
-            if line.startswith("Wrote AI envelope:"):
-                out_path = line.split("Wrote AI envelope:", 1)[1].strip()
-                break
-        return True, out_path or "ok"
-    except Exception as e:
-        return False, f"reduce4ai exception: {type(e).__name__}: {e}"
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if res.returncode != 0:
+        err = (res.stderr or res.stdout or "").strip()
+        return False, f"reduce4ai failed: {err[:2000]}"
+
+    expected = outdir / (capture_path.stem + ".ai_input.json")
+    if not expected.exists():
+        # If reduce4ai succeeded but the file isn't there, that's a hard error.
+        tail = (res.stdout or "").strip().splitlines()[-20:]
+        return False, "reduce4ai succeeded but output missing: " + str(expected) + "\n" + "\n".join(tail)
+
+    return True, str(expected)
 
 
 def main() -> int:
