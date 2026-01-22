@@ -13,3 +13,31 @@ systemctl --user enable --now brave-agent.service
 systemctl --user status brave-agent.service
 journalctl --user -u brave-agent.service -n 200 --no-pager
 ```
+
+#### Clone the repo fresh
+```
+cd ~
+git clone https://github.com/sherafyk/xAIO-URL-Agent.git
+cd xAIO-URL-Agent
+```
+
+#### See what’s modified (DO NOT guess)
+
+From inside the repo:
+```
+cd ~/xAIO-URL-Agent
+git status
+```
+
+You’ll likely see things like:
+
+`config.yaml`
+
+`.env`
+
+maybe local script edits
+
+possibly output dirs if something accidentally got tracked
+
+👉 Important:
+Some files (like `config.yaml` and `.env`) are supposed to be local-only and should never be committed.
