@@ -19,6 +19,4 @@ shopt -u nullglob
 systemctl --user daemon-reload
 
 echo "Enable timers:"
-echo "  systemctl --user enable --now url-agent.timer"
-echo "  systemctl --user enable --now condense-agent.timer"
-echo "  systemctl --user enable --now ai-agent.timer"
+echo "  systemctl --user enable --now pipeline.timer"
