@@ -24,6 +24,7 @@ from tenacity import (
 )
 
 from logging_utils import elapsed_ms, log_event, setup_logging
+from sheets_batch import batch_update_row_cells
 
 logger = setup_logging("agent")
 
@@ -366,16 +367,6 @@ def open_worksheet(gc: gspread.Client, spreadsheet_url: str, worksheet_name: str
     sh = gc.open_by_url(spreadsheet_url)
     return sh.worksheet(worksheet_name)
 
-def cell_addr(col_letter: str, row: int) -> str:
-    return f"{col_letter}{row}"
-
-def update_row(wks, row: int, updates: Dict[str, str]) -> None:
-    # updates: { "B": "DONE", "C": "...", ... }
-    # Do a single range update if contiguous; for simplicity we update cell-by-cell (low volume).
-    for col, val in updates.items():
-        wks.update_acell(cell_addr(col, row), val)
-
-
 @retry(
     reraise=True,
     stop=stop_after_attempt(5),
@@ -384,7 +375,7 @@ def update_row(wks, row: int, updates: Dict[str, str]) -> None:
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 def update_row_with_retry(wks, row: int, updates: Dict[str, str]) -> None:
-    update_row(wks, row, updates)
+    batch_update_row_cells(wks, row, updates)
 
 
 def safe_update_row(wks, row: int, updates: Dict[str, str], *, item_id: str, url: str) -> None:
@@ -411,11 +402,9 @@ def run_once(cfg: Config) -> None:
     gc = gs_client()
     wks = open_worksheet(gc, cfg.spreadsheet_url, cfg.worksheet_name)
 
-    # Pull all values (fine for a few thousand rows; simplest v1).
-    all_vals: List[List[str]] = wks.get_all_values()
-
-    url_i = col_letter_to_index(cfg.col_url) - 1
-    status_i = col_letter_to_index(cfg.col_status) - 1
+    url_values = wks.col_values(col_letter_to_index(cfg.col_url))
+    status_values = wks.col_values(col_letter_to_index(cfg.col_status))
+    max_rows = max(len(url_values), len(status_values))
 
     processed = 0
     browser_holder: Dict[str, Any] = {}
@@ -425,11 +414,11 @@ def run_once(cfg: Config) -> None:
     with sync_playwright() as pw:
         browser_holder["pw"] = pw
 
-        for sheet_row_idx in range(cfg.first_data_row, len(all_vals) + 1):
-            row_vals = all_vals[sheet_row_idx - 1]
-
-            url = safe_str(row_vals[url_i] if url_i < len(row_vals) else "")
-            status = safe_str(row_vals[status_i] if status_i < len(row_vals) else "").upper()
+        for sheet_row_idx in range(cfg.first_data_row, max_rows + 1):
+            url = safe_str(url_values[sheet_row_idx - 1] if sheet_row_idx - 1 < len(url_values) else "")
+            status = safe_str(
+                status_values[sheet_row_idx - 1] if sheet_row_idx - 1 < len(status_values) else ""
+            ).upper()
 
             if not url:
                 continue

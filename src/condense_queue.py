@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import gspread
 import yaml
@@ -34,6 +34,7 @@ from tenacity import (
 )
 
 from logging_utils import elapsed_ms, log_event, setup_logging
+from sheets_batch import batch_update_row_cells
 
 logger = setup_logging("condense_queue")
 
@@ -47,11 +48,7 @@ def col_letter_to_index(letter: str) -> int:
     n = 0
     for ch in letter:
         n = n * 26 + (ord(ch) - ord("A") + 1)
-    return n - 1  # zero-based
-
-
-def cell_addr(col_letter: str, row: int) -> str:
-    return f"{col_letter}{row}"
+    return n
 
 
 def safe(s: str) -> str:
@@ -68,9 +65,7 @@ def open_worksheet(gc: gspread.Client, spreadsheet_url: str, worksheet_name: str
 
 
 def update_cells(wks, row: int, updates: Dict[str, str]) -> None:
-    # small volume; cell-by-cell is fine for v1
-    for col, val in updates.items():
-        wks.update_acell(cell_addr(col, row), val)
+    batch_update_row_cells(wks, row, updates)
 
 
 @retry(
@@ -199,24 +194,22 @@ def main() -> int:
     gc = gs_client()
     wks = open_worksheet(gc, cfg.spreadsheet_url, cfg.worksheet_name)
 
-    all_vals: List[List[str]] = wks.get_all_values()
-
-    idx_status = col_letter_to_index(cfg.col_status)
-    idx_json = col_letter_to_index(cfg.col_json_path)
-    idx_ai_status = col_letter_to_index(cfg.col_ai_status)
-    idx_url = col_letter_to_index(cfg.col_url)
+    url_values = wks.col_values(col_letter_to_index(cfg.col_url))
+    status_values = wks.col_values(col_letter_to_index(cfg.col_status))
+    json_values = wks.col_values(col_letter_to_index(cfg.col_json_path))
+    ai_status_values = wks.col_values(col_letter_to_index(cfg.col_ai_status))
+    max_rows = max(len(url_values), len(status_values), len(json_values), len(ai_status_values))
 
     processed = 0
 
     log_event(logger, stage="run_start", message="condense run starting")
 
-    for rownum in range(cfg.first_data_row, len(all_vals) + 1):
-        row = all_vals[rownum - 1]
-
-        status = safe(row[idx_status] if idx_status < len(row) else "").upper()
-        ai_status = safe(row[idx_ai_status] if idx_ai_status < len(row) else "").upper()
-        json_path = safe(row[idx_json] if idx_json < len(row) else "")
-        url = safe(row[idx_url] if idx_url < len(row) else "")
+    for rownum in range(cfg.first_data_row, max_rows + 1):
+        row_idx = rownum - 1
+        status = safe(status_values[row_idx] if row_idx < len(status_values) else "").upper()
+        ai_status = safe(ai_status_values[row_idx] if row_idx < len(ai_status_values) else "").upper()
+        json_path = safe(json_values[row_idx] if row_idx < len(json_values) else "")
+        url = safe(url_values[row_idx] if row_idx < len(url_values) else "")
         item_id = Path(json_path).stem if json_path else f"row-{rownum}"
 
         if status != "DONE":
