@@ -35,6 +35,11 @@ columns_ai:
   xaio_path: "S"
   xaio_error: "T"
 
+columns_wp:
+  wp_status: "U"
+  wp_post_id: "V"
+  wp_error: "W"
+
 agent:
   # Required: output locations for capture agent.
   output_dir: "./out"
