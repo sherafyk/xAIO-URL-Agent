@@ -36,6 +36,7 @@ from tenacity import (
 
 from strip_content_for_meta import load_json, write_meta_input
 from logging_utils import elapsed_ms, log_event, setup_logging
+from sheets_batch import batch_update_row_cells
 
 logger = setup_logging("ai_queue")
 
@@ -49,11 +50,7 @@ def col_letter_to_index(letter: str) -> int:
     n = 0
     for ch in letter:
         n = n * 26 + (ord(ch) - ord("A") + 1)
-    return n - 1  # zero-based
-
-
-def cell_addr(col_letter: str, row: int) -> str:
-    return f"{col_letter}{row}"
+    return n
 
 
 def safe(s: str) -> str:
@@ -70,8 +67,7 @@ def open_worksheet(gc: gspread.Client, spreadsheet_url: str, worksheet_name: str
 
 
 def update_cells(wks, row: int, updates: Dict[str, str]) -> None:
-    for col, val in updates.items():
-        wks.update_acell(cell_addr(col, row), val)
+    batch_update_row_cells(wks, row, updates)
 
 
 @retry(
@@ -293,14 +289,20 @@ def main() -> int:
     gc = gs_client()
     wks = open_worksheet(gc, cfg.spreadsheet_url, cfg.worksheet_name)
 
-    all_vals: List[List[str]] = wks.get_all_values()
-
-    idx_url = col_letter_to_index(cfg.col_url)
-    idx_ai_status = col_letter_to_index(cfg.col_ai_status)
-    idx_ai_input = col_letter_to_index(cfg.col_ai_input_path)
-    idx_meta_status = col_letter_to_index(cfg.col_meta_status)
-    idx_claims_status = col_letter_to_index(cfg.col_claims_status)
-    idx_xaio_status = col_letter_to_index(cfg.col_xaio_status)
+    url_values = wks.col_values(col_letter_to_index(cfg.col_url))
+    ai_status_values = wks.col_values(col_letter_to_index(cfg.col_ai_status))
+    ai_input_values = wks.col_values(col_letter_to_index(cfg.col_ai_input_path))
+    meta_status_values = wks.col_values(col_letter_to_index(cfg.col_meta_status))
+    claims_status_values = wks.col_values(col_letter_to_index(cfg.col_claims_status))
+    xaio_status_values = wks.col_values(col_letter_to_index(cfg.col_xaio_status))
+    max_rows = max(
+        len(url_values),
+        len(ai_status_values),
+        len(ai_input_values),
+        len(meta_status_values),
+        len(claims_status_values),
+        len(xaio_status_values),
+    )
 
     processed = 0
 
@@ -315,14 +317,14 @@ def main() -> int:
 
     log_event(logger, stage="run_start", message="ai queue starting")
 
-    for rownum in range(cfg.first_data_row, len(all_vals) + 1):
-        row = all_vals[rownum - 1]
-        url = safe(row[idx_url] if idx_url < len(row) else "")
-        ai_status = safe(row[idx_ai_status] if idx_ai_status < len(row) else "").upper()
-        ai_input_path_val = safe(row[idx_ai_input] if idx_ai_input < len(row) else "")
-        meta_status = safe(row[idx_meta_status] if idx_meta_status < len(row) else "").upper()
-        claims_status = safe(row[idx_claims_status] if idx_claims_status < len(row) else "").upper()
-        xaio_status = safe(row[idx_xaio_status] if idx_xaio_status < len(row) else "").upper()
+    for rownum in range(cfg.first_data_row, max_rows + 1):
+        row_idx = rownum - 1
+        url = safe(url_values[row_idx] if row_idx < len(url_values) else "")
+        ai_status = safe(ai_status_values[row_idx] if row_idx < len(ai_status_values) else "").upper()
+        ai_input_path_val = safe(ai_input_values[row_idx] if row_idx < len(ai_input_values) else "")
+        meta_status = safe(meta_status_values[row_idx] if row_idx < len(meta_status_values) else "").upper()
+        claims_status = safe(claims_status_values[row_idx] if row_idx < len(claims_status_values) else "").upper()
+        xaio_status = safe(xaio_status_values[row_idx] if row_idx < len(xaio_status_values) else "").upper()
 
         if ai_status != "AI_READY":
             continue
