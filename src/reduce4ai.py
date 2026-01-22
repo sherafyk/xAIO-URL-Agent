@@ -197,6 +197,7 @@ def extract_signals(capture: Dict[str, Any]) -> CaptureSignals:
 
     # Content text (you said you want ALL of it, so we keep verbatim)
     extracted_text = first_nonempty(
+        get_nested(capture, "content.extracted_text_full"),
         get_nested(capture, "content.text"),
         get_nested(capture, "content.extracted_text"),
         get_nested(capture, "extracted_text"),
