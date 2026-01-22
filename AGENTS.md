@@ -1,93 +1,259 @@
 # Agent Tasks
 
-1. **Massively reduce Google Sheets reliance & rate limiting**
-2. **Fix path/working-directory/config weirdness + the “duplicate .config/systemd vs repo systemd” confusion**
-3. **Add WordPress publishing: create “content” CPT entries + push SCF fields as metadata**
+## WordPress: create “content” CPT posts + upload SCF fields as metadata
 
-I’m going to give you this in **two implementation tiers** for #1:
+### 1) One-time WordPress setup
 
-* **Tier A (quick win):** keep the Sheet state machine, but reduce write calls by *orders of magnitude* (batch update instead of `update_acell` per cell). This alone often stops quota pain immediately.
-* **Tier B (real scale):** Sheet becomes *intake only* (or optional dashboard), and the pipeline state machine moves to SQLite (which you already have). That’s the “thousands/minute in theory” direction.
+#### 1.1 Use an Application Password (recommended)
+
+Even if you already have a user+password, use an **Application Password** for REST calls (it’s the intended path for API clients). WordPress documents using Application Passwords with REST requests and Basic Authorization headers. ([WordPress Developer Resources][1])
+
+#### 1.2 Confirm your REST endpoints exist
+
+Because your CPTs are REST-enabled, you should be able to hit (examples):
+
+* `GET /wp-json/wp/v2/content`
+* `GET /wp-json/wp/v2/contributor`
+* `GET /wp-json/wp/v2/organization`
+
+WordPress’ REST API uses the `show_in_rest` flag to expose post types in `/wp/v2/...`. ([WordPress Developer Resources][2])
+
+#### 1.3 Topics taxonomy: resolve the slug mismatch now
+
+Your SCF export defines a taxonomy slug **`topic`** (REST-enabled), 
+but your **content** post type lists **`xaio_topic_tax`** in its taxonomies list. 
+
+So: your pipeline should not guess. Verify on the site via:
+
+* `GET /wp-json/wp/v2:contentReference[oaicite:4]{index=4}mies`)
+* `GET /wp-json/wp/v2/taxonomies` (find your “Topics” taxonomy slug)
+
+(If you sfully” send topics that never attach.)
 
 ---
 
-## 1) Reduce reliance on Google Sheets (and stop rate limits)
+### 2) Best architecture: add one WP ingest endpoint (so the pipeline stays simple)
 
-### First: what’s causing the quota burn in your code
+**Why:** In your SCF export, most Content field groups are `show_in_rest: 0` (meaning they won’t reliably show up / be writable via the standard `/wp/v2/content` schema without extra work). So instead of fighting REST meta exposure, do a tiny WP-side “ingest” endpoint that *writes posts + SCF fields server-side*.
 
-Right now each stage writes to Sheets in the most expensive way possible: **one API call per cell**.
+#### 2.1 Create an MU-plugin: `wp-content/mu-plugins/xaio-ingest.php`
 
-Examples:
+```php
+<?php
+/**
+ * Plugin Name: xAIO Ingest API
+ * Description: Ingests xAIO pipeline JSON and upserts content/contributor/organization + topics.
+ */
 
-* `src/agent.py` → `update_row()` calls `wks.update_acell(...)` repeatedly for **B,C,D,E,F,G,H**.
-* `src/condense_queue.py` → writes **I,J,K** via per-cell updates.
-* `src/ai_queue.py` → writes **L–T** in multiple step transitions via per-cell updates.
+add_action('rest_api_init', function () {
+  register_rest_route('xaio/v1', '/ingest', [
+    'methods'  => 'POST',
+    'permission_callback' => function () {
+      return current_user_can('edit_posts');
+    },
+    'callback' => 'xaio_ingest_handler',
+  ]);
+});
 
-That means one processed URL can easily be **20–40 separate write requests** depending on how many transitions happen in a run.
+function xaio_ingest_handler(WP_REST_Request $req) {
+  $p = $req->get_json_params();
 
-Even if the *data* is “mostly path names”, the real killer is **request count**, not payload size.
+  $xaio_id = isset($p['xaio_id']) ? sanitize_text_field($p['xaio_id']) : '';
+  if (!$xaio_id) return new WP_REST_Response(['error' => 'xaio_id is required'], 400);
 
----
+  // REQUIRED by your SCF schema for Content
+  $canonical_url = isset($p['canonical_url']) ? esc_url_raw($p['canonical_url']) : '';
+  if (!$canonical_url) return new WP_REST_Response(['error' => 'canonical_url is required'], 400);
 
-## Tier A: Keep the Sheet pipeline, but rewrite updates to batch in 1 request
+  // In your schema, content_mode is required; default to "url"
+  $content_mode = isset($p['content_mode']) ? sanitize_text_field($p['content_mode']) : 'url';
 
-### Goal
+  $content_title = isset($p['content_title']) ? sanitize_text_field($p['content_title']) : '';
+  $post_body     = isset($p['post_body']) ? (string)$p['post_body'] : '';
 
-Replace every “update 7–9 cells” sequence with **one** `batch_update()` call.
+  // --- Upsert contributor stub ---
+  $contrib_name = isset($p['contributor_name']) ? sanitize_text_field($p['contributor_name']) : '';
+  $contrib_id = 0;
+  if ($contrib_name) {
+    $contrib_slug = sanitize_title($contrib_name);
+    $contrib_id = xaio_upsert_post('contributor', $contrib_slug, $contrib_name, 'draft');
 
-### Step A1 — Add a shared batch-update helper
+    // Your schema requires xaio_code; generate deterministically from slug
+    xaio_update_scf_field($contrib_id, 'display_name', $contrib_name);
+    xaio_update_scf_field($contrib_id, 'xaio_code', $contrib_slug);
+  }
 
-Create a new file:
+  // --- Upsert organization stub ---
+  $org_name   = isset($p['org_name']) ? sanitize_text_field($p['org_name']) : '';
+  $org_domain = isset($p['org_domain']) ? sanitize_text_field($p['org_domain']) : '';
+  $org_id = 0;
+  if ($org_name || $org_domain) {
+    $org_slug = sanitize_title($org_domain ?: $org_name);
+    $org_id = xaio_upsert_post('organization', $org_slug, ($org_name ?: $org_domain), 'draft');
 
-#### ✅ `src/sheets_batch.py` (new)
+    // Your schema requires org_website_primary; normalize from domain if needed
+    $org_url = isset($p['org_website_primary']) ? esc_url_raw($p['org_website_primary']) : '';
+    if (!$org_url && $org_domain) $org_url = 'https://' . preg_replace('/^https?:\/\//', '', $org_domain);
 
-```python
-from __future__ import annotations
+    if ($org_url) xaio_update_scf_field($org_id, 'org_website_primary', $org_url);
+    if ($org_domain) xaio_update_scf_field($org_id, 'primary_domain', $org_domain);
+  }
 
-import logging
-from typing import Dict, Any, List
+  // --- Upsert content ---
+  $content_slug = sanitize_title($xaio_id);
+  $content_id = xaio_upsert_post('content', $content_slug, $xaio_id, 'draft');
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from gspread import Worksheet
-from gspread.exceptions import APIError
+  // Store the body as the WP post content (so themes/editors can render it)
+  wp_update_post([
+    'ID' => $content_id,
+    'post_content' => $post_body,
+  ]);
 
-logger = logging.getLogger(__name__)
+  // Map your SCF fields (names come from your SCF export)
+  xaio_update_scf_field($content_id, 'xaio_id', $xaio_id);
+  xaio_update_scf_field($content_id, 'canonical_url', $canonical_url);
+  xaio_update_scf_field($content_id, 'content_mode', $content_mode);
+  if ($content_title) xaio_update_scf_field($content_id, 'url_content_title', $content_title);
 
-@retry(
-    reraise=True,
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type((APIError,)),
-)
-def batch_update_row_cells(
-    wks: Worksheet,
-    row: int,
-    col_to_value: Dict[str, Any],
-    *,
-    value_input_option: str = "RAW",
-) -> None:
-    """
-    Update multiple single-cell ranges in ONE Sheets API call.
+  // Relationships (SCF Post Object fields)
+  if ($org_id) xaio_update_scf_field($content_id, 'primary_organization', $org_id);
+  if ($contrib_id) xaio_update_scf_field($content_id, 'related_contributors', [$contrib_id]);
 
-    col_to_value keys are column letters like "B", "F", "K".
-    """
-    if not col_to_value:
-        return
+  // Topics / tags (taxonomy)
+  $topics = isset($p['topics']) && is_array($p['topics']) ? $p['topics'] : [];
+  xaio_set_topics($content_id, $topics);
 
-    data: List[dict] = []
-    for col, value in col_to_value.items():
-        a1 = f"{col}{row}"
-        data.append({"range": a1, "values": [[value]]})
+  return new WP_REST_Response([
+    'ok' => true,
+    'content_id' => $content_id,
+    'contributor_id' => $contrib_id,
+    'organization_id' => $org_id,
+    'xaio_id' => $xaio_id,
+  ], 200);
+}
 
-    # One request for all cells
-    wks.batch_update(data, value_input_option=value_input_option)
+function xaio_upsert_post($post_type, $slug, $title, $status='draft') {
+  $existing = get_page_by_path($slug, OBJECT, $post_type);
+  if ($existing && !is_wp_error($existing)) {
+    wp_update_post(['ID' => $existing->ID, 'post_title' => $title]);
+    return (int)$existing->ID;
+  }
+
+  $id = wp_insert_post([
+    'post_type'   => $post_type,
+    'post_title'  => $title,
+    'post_name'   => $slug,
+    'post_status' => $status,
+  ], true);
+
+  if (is_wp_error($id)) {
+    throw new Exception($id->get_error_message());
+  }
+  return (int)$id;
+}
+
+function xaio_update_scf_field($post_id, $field_name, $value) {
+  // Secure Custom Fields is a fork of ACF; if ACF-style helpers exist, prefer them.
+  if (function_exists('update_field')) {
+    update_field($field_name, $value, $post_id);
+  } else {
+    update_post_meta($post_id, $field_name, $value);
+  }
+}
+
+function xaio_set_topics($post_id, $topics) {
+  if (!$topics) return;
+
+  // Robust: pick the first taxonomy that looks like your topics taxonomy.
+  $taxes = get_object_taxonomies('content');
+  $topic_tax = in_array('xaio_topic_tax', $taxes, true) ? 'xaio_topic_tax' : (in_array('topic', $taxes, true) ? 'topic' : 'topic');
+
+  $term_ids = [];
+  foreach ($topics as $t) {
+    $t = sanitize_text_field($t);
+    if (!$t) continue;
+    $exists = term_exists($t, $topic_tax);
+    if (!$exists) $exists = wp_insert_term($t, $topic_tax);
+    if (is_array($exists) && isset($exists['term_id'])) $term_ids[] = (int)$exists['term_id'];
+    else if (is_int($exists)) $term_ids[] = $exists;
+  }
+
+  if ($term_ids) wp_set_object_terms($post_id, $term_ids, $topic_tax, false);
+}
 ```
 
-This deliberately uses **multiple ranges** but still **one API call**.
+**Why this works for your schema:**
 
-> You could optimize further into contiguous ranges (like `B{row}:H{row}`), but this is already a massive win and is simpler/safer.
+* Your **Content** schema requires `canonical_url` and `content_mode`.  
+* You added `xaio_id` and `url_content_title` as identity fields. 
+* Your **Content relationships** fields are `primary_organization:contentReference[oaicite:9]{index=9}:contentReference[oaicite:10]{index=10}:contentReference[oaicite:11]{index=11}- Your **Contributor** schema requires `display_name`and`xaio_code`om a slug). 
+* Your **Organization** schema requires `org_websi from a domain when needed). 
+* SCF is a fork of ACF, so using `update_field()` wheo ensure SCF stores values the way it expects.
 
 ---
+
+### 3) Pipeline step: call the ingest ent item)
+
+#### 3.1 Example payload your pipeline should send
+
+```json
+{
+  "xaio_id": "NYT_2026_01_22_foo",
+  "canonical_url": "https://example.com/article",
+  "content_mode": "url",
+  "content_title": "The human-readable article title",
+  "post_body": "<p>Full article body…</p>",
+  "contributor_name": "Jane Doe",
+  "org_name": "Example News",
+  "org_domain": "example.com",
+  "topics": ["AI Policy", "Compute", "Energy"]
+}
+```
+
+#### 3.2 Example Python call (requests)
+
+```python
+import base64, requests
+
+wp_base = "https://YOUR_SITE"
+user = "api-user"
+app_password = "xxxx xxxx xxxx xxxx xxxx xxxx"  # from WP profile screen
+
+token = base64.b64encode(f"{user}:{app_password}".encode()).decode()
+headers = {
+    "Authorization": f"Basic {token}",
+    "Content-Type": "application/json",
+}
+
+payload = {...}  # the JSON above
+r = requests.post(f"{wp_base}/wp-json/xaio/v1/ingest", json=payload, headers=headers, timeout=30)
+r.raise_for_status()
+print(r.json())
+```
+
+(WordPress’ official Application Password guidance uses this Basic Authorization pattern for REST calls.) ([WordPress Developer Resources][1])
+
+---
+
+### 4) Operational details that will save you pain (a.k.a. Thelen being boring on purpose)
+
+#### 4.1 Idempotency: your xAIO ID should upsert, not duplicate
+
+The plugin uses `post_name` (slug) = `xaio_id`, so reruns update the same record.
+
+#### 4.2 Don’t create “required repeater” rows unless you have the data
+
+Your schema makes `claim_text`/`claim_type` required **per row**, 
+so: send an **empty array** for the repeater until claim extraction is ready, rather than sending a half-filled row.
+
+#### 4.3 Topics: treat taxonomy slug as config
+
+Because of the `topic` vs `xaio_topic_tax` mismatch, keep a pipeline config value (or rely on the plugin’s detection) so you can change it oncede.  
+
+---
+
+
+## 1) Reduce reliance on Google Sheets (and stop rate limits)
 
 ### Step A2 — Replace `update_acell` loops in all three stages
 
@@ -626,369 +792,3 @@ systemctl --user restart brave-agent.service
 
 ---
 
-# 3) WordPress: create “content” CPT posts + upload SCF fields as metadata
-
-You said the site is **xaio.org** and the fields are SCF-backed for a CPT called **`content`**.
-
-There’s one key constraint:
-
-### Important constraint
-
-Your pipeline **cannot** truly “create a custom post type” dynamically from the outside.
-In WordPress, a CPT must be registered by PHP code (theme/plugin) or via SCF UI. What your pipeline *can* do is:
-
-* create **posts of an existing CPT** (`content`)
-* set SCF/ACF fields for that post
-
-To expose a CPT in the REST API, WordPress requires `show_in_rest => true` when registering the post type. ([WordPress Developer Resources][1])
-
----
-
-## WordPress side: one-time setup
-
-### Step WP1 — Ensure the CPT exists and is REST-enabled
-
-If SCF created your CPT via UI, confirm:
-
-* CPT slug is `content`
-* it’s visible in REST (SCF/WordPress setting)
-
-If you’re doing it in code, it looks like this:
-
-```php
-register_post_type('content', [
-  'label' => 'Content',
-  'public' => true,
-  'show_in_rest' => true,
-  'supports' => ['title', 'editor', 'custom-fields'],
-]);
-```
-
-Again, `show_in_rest` is the crucial part. ([WordPress Developer Resources][1])
-
-Also: your SCF export shows related post object fields pointing to:
-
-* `organization`
-* `contributor`
-
-So those CPTs need to exist & be REST-enabled too if you want to auto-create/link them.
-
----
-
-### Step WP2 — Pick an auth method (use Application Passwords)
-
-WordPress supports Application Passwords (WP 5.6+) which work with HTTPS + Basic Auth. ([WordPress Developer Resources][2])
-
-You’ll create:
-
-* a dedicated WP user like `xaio_ingest`
-* generate an **application password**
-* store it in `.env` on the agent machine (not in git)
-
----
-
-## Two ways to write SCF fields from your pipeline
-
-### Option 1 (best): Custom WP REST endpoint that calls SCF/ACF functions server-side
-
-This is the most reliable for repeaters and post-object fields.
-
-**Why:** SCF is a fork of ACF and includes deep field handling; pushing raw meta can be tricky. SCF/ACF can also integrate with REST depending on settings, but repeaters/post_object updates are where custom endpoints save you pain. ([WordPress Developer Resources][3])
-
-**High-level:**
-
-* You POST your `*.xaio_parsed.json` to `/wp-json/xaio/v1/ingest`
-* WP code:
-
-  * creates/updates the `content` post
-  * uses `update_field()` (SCF/ACF function family) to set values
-  * looks up/creates `organization` and `contributor` posts
-  * attaches them
-
-### Option 2: Use SCF/ACF REST integration directly
-
-ACF (and likely SCF) supports REST field integration (ACF notes REST integration since 5.11). ([ACF][4])
-But in your `config/scf-export-content.json`, your field groups show `show_in_rest: 0` for the main “Content …” groups — so you’d need to toggle that in WP/SCF for those groups, or they won’t be writable/readable via REST.
-
----
-
-## Pipeline side: implement a WordPress upload stage
-
-Your final artifact is written here:
-
-* `src/merge_xaio.py` → `out_xaio/<id>.xaio_parsed.json`
-
-So the cleanest design is a new stage:
-
-✅ **Stage 4: `wp_upload_queue.py`**
-Reads DB rows where `xaio_status == XAIO_DONE` and `wp_status != WP_DONE`, then uploads.
-
-### Step P1 — Add WordPress settings to config
-
-Update `config/config.example.yaml` with:
-
-```yaml
-wordpress:
-  base_url: "https://xaio.org"
-  api_base: "https://xaio.org/wp-json"
-  username: "xaio_ingest"
-  app_password_env: "WP_APP_PASSWORD"
-  post_type: "content"
-  post_status: "draft"
-  timeout_s: 30
-```
-
-Then in your real `.env`:
-
-```bash
-export WP_APP_PASSWORD="xxxx xxxx xxxx xxxx xxxx xxxx"
-```
-
-(Keep it out of git.)
-
----
-
-### Step P2 — Create `src/wp_client.py` (new)
-
-```python
-from __future__ import annotations
-
-import base64
-import os
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
-import requests
-
-@dataclass
-class WPConfig:
-    api_base: str
-    username: str
-    app_password: str
-    timeout_s: int = 30
-
-class WPClient:
-    def __init__(self, cfg: WPConfig):
-        self.cfg = cfg
-
-    def _auth_header(self) -> Dict[str, str]:
-        token = base64.b64encode(f"{self.cfg.username}:{self.cfg.app_password}".encode("utf-8")).decode("utf-8")
-        return {"Authorization": f"Basic {token}"}
-
-    def post(self, path: str, json: Dict[str, Any]) -> requests.Response:
-        url = self.cfg.api_base.rstrip("/") + "/" + path.lstrip("/")
-        return requests.post(
-            url,
-            headers={**self._auth_header(), "Content-Type": "application/json"},
-            json=json,
-            timeout=self.cfg.timeout_s,
-        )
-
-    def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
-        url = self.cfg.api_base.rstrip("/") + "/" + path.lstrip("/")
-        return requests.get(
-            url,
-            headers=self._auth_header(),
-            params=params or {},
-            timeout=self.cfg.timeout_s,
-        )
-```
-
-Application Password + Basic Auth is documented in WP REST auth docs. ([WordPress Developer Resources][2])
-
----
-
-### Step P3 — Create `src/wp_upload_queue.py` (new)
-
-This assumes you implemented Tier B and DB has `xaio_path` + `wp_status`.
-
-Skeleton:
-
-```python
-#!/usr/bin/env python3
-from __future__ import annotations
-
-import argparse
-import json
-import os
-from pathlib import Path
-
-from state_db import connect as db_connect
-from wp_client import WPClient, WPConfig
-
-def load_yaml_config(path: Path) -> dict:
-    import yaml
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-def load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", "config.yaml"))
-    args = ap.parse_args()
-
-    cfg_path = Path(args.config).expanduser().resolve()
-    data = load_yaml_config(cfg_path)
-
-    db_path = Path(data["agent"]["sqlite_path"]).expanduser().resolve()
-    conn = db_connect(db_path)
-
-    wp = data["wordpress"]
-    app_pw = os.getenv(wp["app_password_env"])
-    if not app_pw:
-        raise SystemExit(f"Missing env var {wp['app_password_env']}")
-
-    client = WPClient(WPConfig(
-        api_base=wp["api_base"],
-        username=wp["username"],
-        app_password=app_pw,
-        timeout_s=int(wp.get("timeout_s", 30)),
-    ))
-
-    limit = int(wp.get("max_per_run", 50))
-
-    cur = conn.execute("""
-        SELECT url_hash, xaio_path
-        FROM items
-        WHERE xaio_status = 'XAIO_DONE'
-          AND xaio_path IS NOT NULL
-          AND (wp_status IS NULL OR wp_status = '' OR wp_status IN ('WP_FAILED'))
-        ORDER BY processed_at DESC
-        LIMIT ?;
-    """, (limit,))
-    items = cur.fetchall()
-
-    for r in items:
-        url_hash = r["url_hash"]
-        xaio_path = Path(r["xaio_path"])
-
-        conn.execute("UPDATE items SET wp_status=?, wp_error=? WHERE url_hash=?",
-                     ("WP_RUNNING", "", url_hash))
-        conn.commit()
-
-        xaio = load_json(xaio_path)
-
-        # Build WP payload.
-        # If using a custom endpoint:
-        payload = {
-            "source_id": url_hash,
-            "post_type": wp.get("post_type", "content"),
-            "post_status": wp.get("post_status", "draft"),
-            "xaio": xaio,
-        }
-
-        resp = client.post("/xaio/v1/ingest", json=payload)
-
-        if resp.status_code >= 300:
-            conn.execute("UPDATE items SET wp_status=?, wp_error=? WHERE url_hash=?",
-                         ("WP_FAILED", f"{resp.status_code}: {resp.text[:2000]}", url_hash))
-            conn.commit()
-            continue
-
-        out = resp.json()
-        post_id = out.get("post_id")
-
-        conn.execute("UPDATE items SET wp_status=?, wp_post_id=?, wp_error=? WHERE url_hash=?",
-                     ("WP_DONE", post_id, "", url_hash))
-        conn.commit()
-
-    return 0
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-```
-
----
-
-### Step P4 — Wire it into the pipeline
-
-Update `src/pipeline_run.py`:
-
-From:
-
-```python
-run([py, "src/agent.py"])
-run([py, "src/condense_queue.py"])
-run([py, "src/ai_queue.py"])
-```
-
-To:
-
-```python
-run([py, "src/agent.py", "--config", "config.yaml"])
-run([py, "src/condense_queue.py", "--config", "config.yaml"])
-run([py, "src/ai_queue.py", "--config", "config.yaml"])
-run([py, "src/wp_upload_queue.py", "--config", "config.yaml"])
-```
-
-Then add systemd units/timer if you want it separate (optional).
-
----
-
-## Mapping SCF fields correctly (based on your SCF export)
-
-From `config/scf-export-content.json`, your SCF field names include:
-
-* `canonical_url`
-* `content_mode`
-* `domain`, `site_name`
-* `language`
-* `published_at`, `modified_time`, `collected_at_utc`
-* `workflow_status`, `intake_kind`
-* `extracted_text_full`, `char_count`, `word_count`
-* repeater `claims` with subfields:
-
-  * `claim_text`, `claim_type`, `verdict`, etc.
-* post_object:
-
-  * `primary_organization` → post type `organization`, return `id`
-  * `related_contributors` → post type `contributor`, return `id`
-
-Your pipeline output (`out_xaio/*.xaio_parsed.json`) contains:
-
-* `organization_name` (string)
-* `author_names` (list of strings)
-  …but WP fields want **IDs**, so your WP ingest endpoint should:
-* search/create org/contributor posts by title
-* set post_object fields to their IDs
-
-This is exactly why the **custom WP endpoint** is the easiest: you can do the lookup inside WordPress where you have WP_Query and permissions.
-
----
-
-## WordPress REST exposure and auth references (so you don’t fight 403/404s forever)
-
-* WordPress: Application Passwords + Basic Auth for REST (WP 5.6+) ([WordPress Developer Resources][2])
-* WordPress: `show_in_rest => true` creates `/wp/v2/<type>` routes for CPTs ([WordPress Developer Resources][1])
-* ACF REST integration exists and is documented (SCF is a fork with similar internals, but your groups need REST enabled) ([ACF][4])
-
----
-
-# What I would do in your shoes (practical sequence)
-
-### ✅ Day 1 (fast relief)
-
-1. Implement **Tier A batch updates** → you’ll likely stop hitting Sheets write limits immediately.
-2. Fix systemd unit paths by reinstalling with `./scripts/install_systemd_user.sh`.
-3. Add argparse `--config` support to `agent.py` + honor `XAIO_CONFIG_PATH`.
-
-### ✅ Day 2 (real scale)
-
-4. Implement **Tier B** (DB is the state machine; Sheets optional/minimal).
-5. Add `wp_upload_queue.py` as a fourth stage (DB-driven).
-6. Add a WP custom endpoint for ingestion to handle repeaters + post_object linking cleanly.
-
----
-
-If you want, I can also write you a **drop-in WordPress plugin file** (`xaio-ingest.php`) that registers `/wp-json/xaio/v1/ingest` and:
-
-* creates/updates `content` by `canonical_url`
-* auto-creates/links `organization` + `contributor`
-* writes the SCF fields (including repeater `claims`) in the format SCF expects
-
-…but I didn’t include it inline yet because I don’t want to guess your exact CPT slugs/capabilities beyond what’s in your SCF export (I *can* still make a solid default version without guessing if you’re fine with “content / organization / contributor” as the slugs).
-
-[1]: https://developer.wordpress.org/rest-api%2Fextending-the-rest-api%2Fadding-rest-api-support-for-custom-content-types%2F/ "https://developer.wordpress.org/rest-api%2Fextending-the-rest-api%2Fadding-rest-api-support-for-custom-content-types%2F/"
-[2]: https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/ "https://developer.wordpress.org/rest-api/using-the-rest-api/authentication/"
-[3]: https://developer.wordpress.org/secure-custom-fields/ "https://developer.wordpress.org/secure-custom-fields/"
-[4]: https://www.advancedcustomfields.com/resources/wp-rest-api-integration/ "https://www.advancedcustomfields.com/resources/wp-rest-api-integration/"
