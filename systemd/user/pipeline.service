@@ -1,0 +1,8 @@
+[Unit]
+Description=xAIO end-to-end pipeline (sheet → out → out_ai → out_xaio)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/xAIO-URL-Agent
+ExecStart=/usr/bin/flock -n %h/xAIO-URL-Agent/locks/pipeline.lock %h/xAIO-URL-Agent/venv/bin/python src/pipeline_run.py
+
