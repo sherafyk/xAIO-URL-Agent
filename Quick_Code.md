@@ -57,11 +57,8 @@ chmod +x scripts/deploy_systemd_from_repo.sh
 ./scripts/deploy_systemd_from_repo.sh
 ```
 
-```
-./scripts/deploy_systemd_from_repo.sh
 
 ```
-
-```
+chmod +x scripts/install_systemd_user.sh
 ./scripts/install_systemd_user.sh
 ```
