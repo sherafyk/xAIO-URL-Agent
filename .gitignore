@@ -40,3 +40,4 @@ Thumbs.db
 .ruff_cache/
 out_*/**
 *.response_raw.json
+.runtime/
