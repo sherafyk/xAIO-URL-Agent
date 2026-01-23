@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+merge_xaio.py
+Merges meta_parsed.json + claims_parsed.json + ai_input.json into final *.xaio_parsed.json
+"""
+
+import argparse
+import json
+import logging
+import time
+from pathlib import Path
+from typing import Any, Dict
+
+from logging_utils import elapsed_ms, log_event, setup_logging
+
+logger = setup_logging("merge_xaio")
+def load_json(p: Path) -> Any:
+    return json.loads(p.read_text(encoding="utf-8"))
+
+def require_meta_fields(meta: Dict[str, Any], fields: list[str]) -> None:
+    missing = [field for field in fields if field not in meta]
+    if missing:
+        raise ValueError(f"meta_parsed missing required fields: {', '.join(missing)}")
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("ai_input_json")
+    ap.add_argument("meta_parsed_json")
+    ap.add_argument("claims_parsed_json")
+    ap.add_argument("--outdir", default="./out_xaio")
+    args = ap.parse_args()
+
+    ai_path = Path(args.ai_input_json).expanduser().resolve()
+    item_id = ai_path.stem.replace(".ai_input", "")
+    start_time = time.monotonic()
+    log_event(logger, stage="merge_start", item_id=item_id, message="merge starting")
+
+    try:
+        meta_path = Path(args.meta_parsed_json).expanduser().resolve()
+        claims_path = Path(args.claims_parsed_json).expanduser().resolve()
+        outdir = Path(args.outdir).expanduser().resolve()
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        ai_input: Dict[str, Any] = load_json(ai_path)
+        meta: Dict[str, Any] = load_json(meta_path)
+        claims: Dict[str, Any] = load_json(claims_path)
+
+        require_meta_fields(meta, ["canonical_url", "domain", "site_name"])
+
+        out: Dict[str, Any] = {}
+        out.update(meta)
+        out["claims"] = claims.get("claims", [])
+
+        url = ai_input.get("url", {}) if isinstance(ai_input.get("url"), dict) else {}
+        meta_block = ai_input.get("meta", {}) if isinstance(ai_input.get("meta"), dict) else {}
+
+        out["canonical_url"] = (
+            meta.get("canonical_url")
+            or (url.get("clean") or {}).get("canonical")
+            or url.get("final")
+            or url.get("original")
+            or ""
+        )
+        out["domain"] = meta.get("domain") or url.get("domain") or ""
+        out["site_name"] = meta.get("site_name") or meta_block.get("site_name") or ""
+
+        # Always inject verbatim full text + counts from capture
+        content = ai_input.get("content", {}) if isinstance(ai_input.get("content"), dict) else {}
+        out["extracted_text_full"] = content.get("extracted_text_full", "")
+
+        # If you store these in your content block, carry them through
+        if "char_count" in content:
+            out["char_count"] = content.get("char_count")
+        if "word_count" in content:
+            out["word_count"] = content.get("word_count")
+
+        base = ai_path.stem.replace(".ai_input", "")
+        out_path = outdir / f"{base}.xaio_parsed.json"
+        out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        log_event(
+            logger,
+            stage="merge_done",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"wrote={out_path} claims={len(out.get('claims', []))}",
+        )
+        return 0
+    except Exception as exc:
+        log_event(
+            logger,
+            stage="merge_failed",
+            item_id=item_id,
+            elapsed_ms_value=elapsed_ms(start_time),
+            message=f"{type(exc).__name__}: {exc}",
+            level=logging.ERROR,
+        )
+        return 1
+
+if __name__ == "__main__":
+    raise SystemExit(main())

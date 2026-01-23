@@ -1,0 +1,115 @@
+# Example configuration for xAIO URL Agent
+# Copy to config.yaml and replace placeholder values.
+
+sheet:
+  # Required: Google Sheets URL and worksheet to operate on.
+  spreadsheet_url: "https://docs.google.com/spreadsheets/d/<ID>/edit"
+  worksheet_name: "Sheet1"
+  # Optional: header and first data row indexes.
+  header_row: 1
+  first_data_row: 2
+
+columns:
+  # Required: columns used by the capture agent.
+  url: "A"
+  status: "B"
+  processed_at: "C"
+  final_url: "D"
+  method: "E"
+  json_path: "F"
+  title: "G"
+  error: "H"
+
+columns_ai:
+  # Optional: columns used by the condense/AI stages (defaults shown).
+  ai_status: "I"
+  ai_input_path: "J"
+  ai_error: "K"
+  meta_status: "L"
+  meta_path: "M"
+  meta_error: "N"
+  claims_status: "O"
+  claims_path: "P"
+  claims_error: "Q"
+  xaio_status: "R"
+  xaio_path: "S"
+  xaio_error: "T"
+
+columns_wp:
+  wp_status: "U"
+  wp_post_id: "V"
+  wp_error: "W"
+
+agent:
+  # Required: output locations for capture agent.
+  output_dir: "./out"
+  sqlite_path: "./agent.db"
+  # Optional: maximum rows to process per run.
+  max_per_run: 50
+
+agent_ai:
+  # Optional: settings for condense_queue.py (defaults shown).
+  out_ai_dir: "./out_ai"
+  prompt_set_id: "xaio-v1-claims+scores"
+  max_per_run: 50
+
+agent_ai_queue:
+  # Optional: settings for ai_queue.py (defaults shown).
+  max_per_run: 50
+
+fetch:
+  # Optional: fetch behavior and browser settings.
+  try_http_first: true
+  http_timeout_s: 20
+  # Required if using Playwright CDP fetch.
+  browser_cdp_endpoint: "http://127.0.0.1:9222"
+  browser_nav_timeout_ms: 30000
+  browser_wait_after_load_ms: 1500
+
+ai:
+  # Optional: model configuration for AI stages.
+  scf_export_path: "./scf-export-content.json"
+  meta:
+    model: "gpt-5-nano"
+    reasoning_effort: "minimal"
+  claims:
+    model: "gpt-5-nano"
+    reasoning_effort: "minimal"
+
+paths:
+  # Optional: stage-specific output directories used by other scripts.
+  out_capture_dir: "./out"
+  out_ai_dir: "./out_ai"
+  out_ai_meta_dir: "./out_ai_meta"
+  out_meta_dir: "./out_meta"
+  out_claims_dir: "./out_claims"
+  out_xaio_dir: "./out_xaio"
+  locks_dir: "./locks"
+  sqlite_path: "./agent.db"
+  secrets_dir: "./secrets"
+
+identity:
+  # Optional: path to local identity overrides.
+  overrides_path: "./config/identity_overrides.yaml"
+
+wordpress:
+  base_url: "https://xaio.org"
+  ingest_path: "/wp-json/xaio/v1/ingest"
+
+  # The WP CPT slugs you already have
+  post_type_content: "content"
+  post_type_contributor: "contributor"
+  post_type_organization: "organization"
+
+  # Used to build the post payload
+  wp_post_status: "draft"
+
+  # Topics generation mode:
+  # - "simple": local keyword extraction (no extra API calls)
+  # - "openai": call OpenAI to generate topics
+  topics_mode: "simple"
+  topics_max: 8
+
+  # How many rows per run
+  max_per_run: 50
+
