@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sys
 from typing import Any, Dict, Optional, Tuple, Type
@@ -11,10 +10,6 @@ from pydantic import BaseModel
 
 def _has_responses(client: Any) -> bool:
     return bool(getattr(client, "responses", None) and hasattr(client.responses, "parse"))
-
-
-logger = logging.getLogger(__name__)
-_warned_no_responses = False
 
 
 def _openai_env_debug() -> str:
@@ -28,16 +23,17 @@ def _openai_env_debug() -> str:
     return f"python={sys.executable} openai_version={version} openai_path={location}"
 
 
-def _maybe_warn_no_responses() -> None:
-    global _warned_no_responses
-    if _warned_no_responses:
+def _ensure_responses_api(client: Any) -> None:
+    if _has_responses(client):
         return
-    _warned_no_responses = True
+    if os.getenv("XAIO_OPENAI_ALLOW_FALLBACK", "").strip():
+        return
     debug = _openai_env_debug()
-    logger.warning(
-        "OpenAI responses API not available; falling back to chat.completions. "
-        "Set XAIO_OPENAI_STRICT_RESPONSES=1 to raise instead. (%s)",
-        debug,
+    raise RuntimeError(
+        "OpenAI responses API not available. "
+        "This usually means the service is running from a different Python environment "
+        "than the one with requirements installed. "
+        f"Set XAIO_OPENAI_ALLOW_FALLBACK=1 to allow a chat.completions fallback. ({debug})"
     )
 
 
@@ -66,13 +62,7 @@ def structured_parse(
         parsed = getattr(resp, "output_parsed", None)
         return parsed, raw
 
-    if os.getenv("XAIO_OPENAI_STRICT_RESPONSES", "").strip():
-        debug = _openai_env_debug()
-        raise RuntimeError(
-            "OpenAI responses API not available and strict mode is enabled. "
-            f"Unset XAIO_OPENAI_STRICT_RESPONSES to allow fallback. ({debug})"
-        )
-    _maybe_warn_no_responses()
+    _ensure_responses_api(client)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -133,13 +123,7 @@ def json_schema_response(
         raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
         output_text = getattr(resp, "output_text", "") or ""
     else:
-        if os.getenv("XAIO_OPENAI_STRICT_RESPONSES", "").strip():
-            debug = _openai_env_debug()
-            raise RuntimeError(
-                "OpenAI responses API not available and strict mode is enabled. "
-                f"Unset XAIO_OPENAI_STRICT_RESPONSES to allow fallback. ({debug})"
-            )
-        _maybe_warn_no_responses()
+        _ensure_responses_api(client)
         try:
             resp = client.chat.completions.create(
                 model=model,

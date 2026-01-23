@@ -53,6 +53,23 @@ pip install -r requirements.txt
 ```
 
 ```
+chmod +x scripts/install_systemd_user.sh
+./scripts/install_systemd_user.sh
+```
+
+```
+cd ~/xAIO-URL-Agent
+source venv/bin/activate
+systemctl --user daemon-reload
+systemctl --user start pipeline.service
+```
+
+
+```
 chmod +x scripts/deploy_systemd_from_repo.sh
 ./scripts/deploy_systemd_from_repo.sh
 ```
+
+
+
+
