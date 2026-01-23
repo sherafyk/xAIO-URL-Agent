@@ -81,16 +81,51 @@ Installed automatically by bootstrap, but listed here for clarity:
 
 ## 4. First-time setup (clean machine)
 
-### 4.1 Clone the repo
+> If you are brand-new to coding, do **exactly** the commands below in order. Copy/paste is fine.
+
+### 4.1 Get the code onto your machine
+
+You have two ways to get the code:
+
+**Option A (recommended): Git clone (best for updates)**
 
 ```bash
 git clone <your-repo-url>
 cd xAIO-URL-Agent
 ```
 
+**Option B: Download ZIP (works, but you must re-download for updates)**
+
+1. Download the ZIP from GitHub
+2. Unzip it
+3. Open a Terminal in the unzipped folder
+
 ---
 
-### 4.2 Make scripts executable (required)
+### 4.2 Fix permissions (so you don’t get “Permission denied”)
+
+If you ever see:
+
+* `Permission denied`
+* or a script won’t run
+
+It usually means your computer is not allowing the file to execute.
+
+Run this ONCE after you download/unzip OR after you pull new code:
+
+```bash
+# From the repo root folder:
+chmod +x scripts/*.sh || true
+chmod +x src/*.py || true
+```
+
+If that still doesn’t fix it, see **Section 4.6 (Permission denied — advanced causes)**.
+
+---
+
+### 4.3 Make scripts executable (required)
+
+If you already did the permission fix above, you can skip this. Otherwise:
 
 ```bash
 chmod +x scripts/*.sh
@@ -98,7 +133,7 @@ chmod +x scripts/*.sh
 
 ---
 
-### 4.3 Bootstrap the machine (system dependencies + venv)
+### 4.4 Bootstrap the machine (system dependencies + venv)
 
 ```bash
 ./scripts/bootstrap_ubuntu.sh
@@ -112,6 +147,103 @@ What this does:
 * Verifies Python version
 
 If this fails → **stop and fix it before continuing**.
+
+---
+
+### 4.5 If you update the code later (the “update” recipe)
+
+If you used **Option A (git clone)**:
+
+```bash
+# From the repo root
+cd xAIO-URL-Agent
+
+git pull
+
+# Fix permissions again (safe even if not needed)
+chmod +x scripts/*.sh || true
+
+# If Python dependencies changed:
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+If you used **Option B (ZIP)**:
+
+* Download the new ZIP
+* Unzip it
+* Run the permission fix:
+
+```bash
+chmod +x scripts/*.sh || true
+```
+
+---
+
+### 4.6 Permission denied — advanced causes (stupid-proof checklist)
+
+If you still get `Permission denied` AFTER running `chmod +x` above, it is usually one of these:
+
+#### Cause A: Your folder is on a “noexec” drive (scripts cannot run there)
+
+This happens on:
+
+* some external drives
+* some corporate shared folders
+* some special mounts
+
+Check:
+
+```bash
+mount | grep -E "\$(pwd)|noexec" || true
+```
+
+If you see `noexec`, move the project somewhere normal, like your home folder:
+
+```bash
+mkdir -p ~/projects
+mv /path/to/xAIO-URL-Agent ~/projects/
+cd ~/projects/xAIO-URL-Agent
+chmod +x scripts/*.sh || true
+```
+
+#### Cause B: Windows line endings (CRLF) in scripts
+
+If scripts complain or behave strangely, fix line endings:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y dos2unix
+
+dos2unix scripts/*.sh
+chmod +x scripts/*.sh || true
+```
+
+#### Cause C: You’re trying to run a script without `./`
+
+Example wrong:
+
+```bash
+scripts/bootstrap_ubuntu.sh
+```
+
+Correct:
+
+```bash
+./scripts/bootstrap_ubuntu.sh
+```
+
+#### Cause D: You are not in the repo root folder
+
+You must run commands from the folder that contains `scripts/`.
+
+Check:
+
+```bash
+ls
+```
+
+You should see `scripts` and `src`.
 
 ---
 
@@ -318,17 +450,51 @@ rm -rf venv
 
 ---
 
-## 12. Source of truth checklist (tattoo this)
+## 12. Source of truth checklist (stupid-proof)
 
-If something breaks, check in this order:
+If something breaks, check in this exact order:
 
-1. `.runtime/.env`
-2. `.runtime/config.yaml`
-3. `.runtime/logs/`
-4. `doctor.sh`
-5. Manual run (never systemd first)
+1. Are you in the correct folder?
 
-If you follow this order, you will not spiral.
+```bash
+ls
+```
+
+You should see: `scripts` and `src`.
+
+2. Fix permissions (safe to run any time)
+
+```bash
+chmod +x scripts/*.sh || true
+chmod +x src/*.py || true
+```
+
+3. Confirm your local config exists
+
+```bash
+ls -la .runtime
+ls -la .runtime/.env
+ls -la .runtime/config.yaml
+```
+
+4. Run the health check
+
+```bash
+./scripts/doctor.sh
+```
+
+5. Run manually (always before systemd)
+
+```bash
+source venv/bin/activate
+python src/pipeline_run.py --config .runtime/config.yaml
+```
+
+6. If systemd fails, read the logs
+
+```bash
+journalctl --user -u pipeline.service -n 200 --no-pager
+```
 
 ---
 
