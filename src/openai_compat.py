@@ -9,6 +9,62 @@ from typing import Any, Dict, Optional, Tuple, Type
 from pydantic import BaseModel
 
 
+def _enforce_strict_json_schema(node: Any) -> Any:
+    """Make a JSON schema compatible with OpenAI strict Structured Outputs.
+
+    OpenAI strict mode requires (among other constraints):
+      - `additionalProperties: false` for every object schema
+      - `required` must include *every* key in `properties`
+        (optional fields should be represented by allowing `null`)
+
+    We apply these rules recursively across properties/items/anyOf/allOf/oneOf
+    and within $defs/definitions.
+    """
+
+    if isinstance(node, dict):
+        # Recurse into common schema containers first
+        for k in ("properties", "$defs", "definitions"):
+            if k in node and isinstance(node[k], dict):
+                for _, v in node[k].items():
+                    _enforce_strict_json_schema(v)
+
+        for k in ("items", "additionalProperties", "propertyNames"):
+            if k in node:
+                _enforce_strict_json_schema(node[k])
+
+        for k in ("anyOf", "allOf", "oneOf"):
+            if k in node and isinstance(node[k], list):
+                for v in node[k]:
+                    _enforce_strict_json_schema(v)
+
+        # If this node is (or can be) an object schema, enforce closed schema rules.
+        t = node.get("type")
+        is_object = t == "object" or (isinstance(t, list) and "object" in t) or "properties" in node
+        if is_object:
+            # OpenAI requires this key to be present and false.
+            node["additionalProperties"] = False
+
+            props = node.get("properties")
+            if isinstance(props, dict):
+                # OpenAI strict requires every property name to appear in required.
+                node["required"] = list(props.keys())
+
+        return node
+
+    if isinstance(node, list):
+        for v in node:
+            _enforce_strict_json_schema(v)
+        return node
+
+    return node
+
+
+def _strict_pydantic_json_schema(model: Type[BaseModel]) -> Dict[str, Any]:
+    schema = model.model_json_schema()
+    _enforce_strict_json_schema(schema)
+    return schema
+
+
 def _has_responses(client: Any) -> bool:
     return bool(getattr(client, "responses", None) and hasattr(client.responses, "parse"))
 
@@ -67,7 +123,7 @@ def structured_parse(
     if _has_responses_create(client):
         json_schema = {
             "name": schema.__name__,
-            "schema": schema.model_json_schema(),
+            "schema": _strict_pydantic_json_schema(schema),
             "strict": True,
         }
         req = dict(
@@ -98,7 +154,7 @@ def structured_parse(
 
     json_schema = {
         "name": schema.__name__,
-        "schema": schema.model_json_schema(),
+        "schema": _strict_pydantic_json_schema(schema),
         "strict": True,
     }
 
