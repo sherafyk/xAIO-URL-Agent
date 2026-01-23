@@ -42,6 +42,7 @@ from tenacity import (
 )
 
 from logging_utils import elapsed_ms, log_event, setup_logging
+from openai_compat import structured_parse
 
 logger = setup_logging("call_openai_parse")
 
@@ -235,28 +236,14 @@ def call_openai_structured(
     Returns (parsed_object_or_none, raw_response_dict)
     """
     client = OpenAI()
-
-    # Responses API + Structured Outputs (Pydantic) per OpenAI docs
-    # https://platform.openai.com/docs/guides/structured-outputs
-    req: Dict[str, Any] = dict(
+    return structured_parse(
+        client,
         model=model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(ai_input, ensure_ascii=False)},
-        ],
-        text_format=xaio_model,
+        system_prompt=SYSTEM_PROMPT,
+        user_content=json.dumps(ai_input, ensure_ascii=False),
+        schema=xaio_model,
+        reasoning_effort=reasoning_effort,
     )
-    if reasoning_effort:
-        # Reasoning effort is supported on GPT-5 family; keep it low/minimal for nano parsing
-        req["reasoning"] = {"effort": reasoning_effort}
-
-    resp = client.responses.parse(**req)  # type: ignore
-    raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
-
-    # If refusal occurred, output_parsed may be None
-    parsed = getattr(resp, "output_parsed", None)
-
-    return parsed, raw
 
 
 # ---------------------------

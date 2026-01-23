@@ -217,6 +217,7 @@ def topics_openai(text: str, k: int = 8) -> List[str]:
     Requires OPENAI_API_KEY in environment, which you already use elsewhere.
     """
     from openai import OpenAI
+    from openai_compat import json_schema_response
     client = OpenAI()
 
     snippet = (text or "")[:8000]  # keep it small & cheap
@@ -244,15 +245,13 @@ def topics_openai(text: str, k: int = 8) -> List[str]:
         "Return 3–8 short topics (2–4 words), title case, no duplicates."
     )
 
-    resp = client.responses.create(
+    data, _raw = json_schema_response(
+        client,
         model="gpt-4.1-mini",
-        input=[
-            {"role": "system", "content": sys},
-            {"role": "user", "content": snippet},
-        ],
-        text={"format": {"type": "json_schema", "json_schema": schema}},
+        system_prompt=sys,
+        user_content=snippet,
+        json_schema=schema,
     )
-    data = json.loads(resp.output_text)
     topics = [t.strip() for t in data.get("topics", []) if t and t.strip()]
     # dedupe
     uniq = []
