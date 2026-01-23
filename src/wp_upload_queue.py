@@ -297,7 +297,7 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", "config.yaml"))
     args = ap.parse_args()
 
     cfg = load_config(args.config)

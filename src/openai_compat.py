@@ -12,6 +12,10 @@ def _has_responses(client: Any) -> bool:
     return bool(getattr(client, "responses", None) and hasattr(client.responses, "parse"))
 
 
+def _has_responses_create(client: Any) -> bool:
+    return bool(getattr(client, "responses", None) and hasattr(client.responses, "create"))
+
+
 def _openai_env_debug() -> str:
     try:
         import openai
@@ -60,6 +64,31 @@ def structured_parse(
         resp = client.responses.parse(**req)  # type: ignore[attr-defined]
         raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
         parsed = getattr(resp, "output_parsed", None)
+        return parsed, raw
+
+    if _has_responses_create(client):
+        json_schema = {
+            "name": schema.__name__,
+            "schema": schema.model_json_schema(),
+            "strict": True,
+        }
+        req = dict(
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            text={"format": {"type": "json_schema", "json_schema": json_schema}},
+        )
+        if reasoning_effort:
+            req["reasoning"] = {"effort": reasoning_effort}
+        resp = client.responses.create(**req)  # type: ignore[attr-defined]
+        raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
+        output_text = getattr(resp, "output_text", "") or ""
+        try:
+            parsed = schema.model_validate_json(output_text)
+        except Exception:
+            parsed = None
         return parsed, raw
 
     _ensure_responses_api(client)

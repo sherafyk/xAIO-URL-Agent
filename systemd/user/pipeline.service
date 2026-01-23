@@ -3,6 +3,8 @@ Description=xAIO pipeline
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/xAIO-URL-Agent
-EnvironmentFile=%h/xAIO-URL-Agent/.runtime/xaio-url-agent.env
-ExecStart=%h/xAIO-URL-Agent/venv/bin/python %h/xAIO-URL-Agent/src/pipeline_run.py
+Environment=XAIO_PROJECT_DIR=%h/xAIO-URL-Agent
+EnvironmentFile=-%h/.config/xaio-url-agent.env
+EnvironmentFile=-${XAIO_PROJECT_DIR}/.runtime/xaio-url-agent.env
+WorkingDirectory=${XAIO_PROJECT_DIR}
+ExecStart=${XAIO_PROJECT_DIR}/venv/bin/python ${XAIO_PROJECT_DIR}/src/pipeline_run.py

@@ -14,6 +14,7 @@ This does NOT modify your existing capture JSON generation.
 from __future__ import annotations
 
 import argparse
+import os
 import logging
 import subprocess
 import sys
@@ -33,9 +34,11 @@ from tenacity import (
     wait_exponential,
 )
 
+from env_bootstrap import load_repo_env
 from logging_utils import elapsed_ms, log_event, setup_logging
 from sheets_batch import batch_update_row_cells
 
+load_repo_env()
 logger = setup_logging("condense_queue")
 
 
@@ -186,7 +189,7 @@ def run_reduce4ai(capture_json_path: str, out_ai_dir: str, prompt_set_id: str) -
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", "config.yaml"))
     args = ap.parse_args()
 
     cfg = load_config(args.config)

@@ -22,8 +22,11 @@ from tenacity import (
     wait_exponential,
 )
 
+from env_bootstrap import load_repo_env
 from logging_utils import elapsed_ms, log_event, setup_logging
 from openai_compat import structured_parse
+
+load_repo_env()
 
 logger = setup_logging("call_openai_meta")
 
