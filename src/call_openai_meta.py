@@ -23,6 +23,7 @@ from tenacity import (
 )
 
 from logging_utils import elapsed_ms, log_event, setup_logging
+from openai_compat import structured_parse
 
 logger = setup_logging("call_openai_meta")
 
@@ -107,20 +108,14 @@ Rules:
 )
 def call_openai_structured(model: str, schema: Type[BaseModel], meta_input: Dict[str, Any], reasoning_effort: Optional[str]) -> Tuple[Optional[BaseModel], Dict[str, Any]]:
     client = OpenAI()
-    req: Dict[str, Any] = dict(
+    return structured_parse(
+        client,
         model=model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(meta_input, ensure_ascii=False)},
-        ],
-        text_format=schema,
+        system_prompt=SYSTEM_PROMPT,
+        user_content=json.dumps(meta_input, ensure_ascii=False),
+        schema=schema,
+        reasoning_effort=reasoning_effort,
     )
-    if reasoning_effort:
-        req["reasoning"] = {"effort": reasoning_effort}
-    resp = client.responses.parse(**req)  # type: ignore
-    raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
-    parsed = getattr(resp, "output_parsed", None)
-    return parsed, raw
 
 def postprocess(out: Dict[str, Any], meta_input: Dict[str, Any]) -> Dict[str, Any]:
     # Canonical URL: always from the clean canonical if available
