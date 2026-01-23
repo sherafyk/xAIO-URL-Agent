@@ -1,418 +1,243 @@
-# xAIO URL Agent – End‑to‑End Pipeline Documentation
+# xAIO URL Agent
 
-> **Purpose:** This repository implements a **local, human‑browser‑backed content ingestion and analysis pipeline** for xAIO. It watches a Google Sheet for URLs, fetches pages using a real desktop browser when needed, captures clean text + metadata, and then runs **multi‑stage AI parsing** (metadata first, claims later) to populate a WordPress Custom Post Type (SCF‑based) in a controlled, auditable way.
+A local, browser-backed pipeline for capturing URL content, reducing it for AI parsing, extracting metadata/claims, and publishing WordPress-ready outputs. It is designed for reliability and traceability: every stage writes artifacts to disk, and the system is safe to re-run.
 
-This README is written as if you are a **brand‑new developer** onboarding to the project.
+## Table of Contents
 
----
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Configuration](#configuration)
+- [Logging](#logging)
+- [Running the Pipeline](#running-the-pipeline)
+- [Systemd Services](#systemd-services)
+- [Diagnostics & Troubleshooting](#diagnostics--troubleshooting)
+- [Common Fixes](#common-fixes)
 
-## 1. High‑Level Concept
+## Overview
 
-This project intentionally avoids “headless scraping + monolithic AI calls.” Instead, it:
+This project watches a Google Sheet for URLs, fetches pages using HTTP or a real browser (Brave via CDP), stores a canonical capture JSON, then runs staged AI parsing (metadata and claims) to produce WordPress-ready output aligned to SCF fields. The pipeline emphasizes:
 
-1. Uses a **local Ubuntu machine** as a physical agent (real browser, real IP, real session).
-2. Separates concerns into **clear pipeline stages**.
-3. Preserves **ground‑truth captures** before any AI touches the data.
-4. Uses **multiple small AI calls** instead of one expensive, overloaded call.
-5. Treats AI as a *parser*, not a crawler and not a fact‑checker (yet).
+- **Ground-truth captures** (stored before AI touches anything).
+- **Small, predictable AI calls** instead of a single monolithic call.
+- **Idempotency** (safe to re-run without duplicates).
 
-At a glance:
+## Architecture
+
+Pipeline stages and artifacts:
 
 ```
 Google Sheet (URL queue)
         ↓
-[agent.py]  ── fetch + capture ──▶ out/YYYY/MM/DD/*.json
+agent.py        → out/YYYY/MM/DD/*.json
         ↓
-[reduce4ai.py] ──▶ out_ai/*.ai_input.json
+reduce4ai.py    → out_ai/*.ai_input.json
         ↓
-──────────────── AI STAGE ────────────────
+strip_content_for_meta.py → out_ai_meta/*.meta_input.json
         ↓
-[strip_content_for_meta.py]
+call_openai_meta.py       → out_meta/*.meta_parsed.json
         ↓
-[call_openai_meta.py]   ──▶ out_meta/*.meta_parsed.json
+call_openai_claims.py     → out_claims/*.claims_parsed.json
         ↓
-[call_openai_claims.py] ──▶ out_claims/*.claims_parsed.json
-        ↓
-[merge_xaio.py]         ──▶ out_xaio/*.xaio_parsed.json
-```
-### Recommended layout
-
-```
-xAIO-url-agent/
-├─ README.md
-├─ docs/
-│  ├─ architecture.md
-│  ├─ sheet-schema.md
-│  ├─ brave-cdp.md
-│  ├─ systemd.md
-│  └─ troubleshooting.md
-├─ src/
-│  ├─ agent.py
-│  ├─ reduce4ai.py
-│  ├─ condense_queue.py
-│  ├─ strip_content_for_meta.py
-│  ├─ call_openai_meta.py
-│  ├─ call_openai_claims.py
-│  └─ merge_xaio.py
-├─ config/
-│  ├─ config.example.yaml
-│  └─ scf-export-content.json
-├─ systemd/
-│  └─ user/
-│     ├─ url-agent.service
-│     ├─ url-agent.timer
-│     ├─ condense-agent.service
-│     ├─ condense-agent.timer
-│     ├─ ai-agent.service
-│     └─ ai-agent.timer
-├─ scripts/
-│  ├─ bootstrap_ubuntu.sh
-│  ├─ install_systemd_user.sh
-│  ├─ brave_debug_launch.sh
-│  ├─ update_and_restart.sh
-│  └─ doctor.sh
-├─ .gitignore
-├─ requirements.txt
-└─ .env.example
-
-```
----
-
-## 2. What This Project Is (and Is Not)
-
-### ✅ This project **IS**:
-
-* A **local‑first ingestion pipeline**
-* Browser‑backed (Brave via Chrome DevTools Protocol)
-* Google Sheets–driven (simple intake UX)
-* Deterministic, auditable, replayable
-* Designed for **xAIO / AIO / trust & integrity workflows**
-
-### ❌ This project **IS NOT**:
-
-* A SaaS crawler
-* A headless scraping farm
-* A fact‑checking engine (that comes later)
-* A one‑shot “summarize this URL” script
-
----
-
-## 3. Environment Requirements
-
-### Operating System
-
-* **Ubuntu LTS** (tested on desktop, not server)
-
-### Python
-
-* Python **3.10+**
-* Virtual environment required
-
-### Browser
-
-* **Brave Browser (Beta recommended)**
-* Must be launched with remote debugging enabled
-
-### External Services
-
-* Google Sheets (service account)
-* OpenAI API (Responses API with Structured Outputs)
-
----
-
-## 4. Local Directory Structure (Authoritative)
-
-```
-~/url-agent/
-│
-├── agent.py                    # Worker A: fetch + capture
-├── reduce4ai.py                # Reduce capture → ai_input
-│
-├── strip_content_for_meta.py   # Remove bulky body text
-├── call_openai_meta.py         # AI Call #1 (metadata only)
-├── call_openai_claims.py       # AI Call #2 (claims only)
-├── merge_xaio.py               # Merge AI outputs
-│
-├── condense_queue.py           # Sheet-driven reducer worker
-│
-├── config.yaml                 # Sheet + column mapping
-├── scf-export-content.json     # WordPress SCF schema export
-│
-├── agent.db                    # SQLite idempotency DB
-│
-├── out/                         # Raw capture JSONs (ground truth)
-│   └── YYYY/MM/DD/*.json
-│
-├── out_ai/                      # Reduced AI input envelopes
-├── out_ai_meta/                # ai_input without body text
-├── out_meta/                   # Parsed metadata results
-├── out_claims/                 # Parsed claims results
-├── out_xaio/                   # Final merged output
-│
-├── locks/                       # flock lock files
-├── secrets/
-│   └── service_account.json    # Google Sheets credentials
-│
-├── venv/                        # Python virtualenv
-└── README.md                   # This document
+merge_xaio.py             → out_xaio/*.xaio_parsed.json
 ```
 
----
+Each stage is replayable. If something fails, fix the root cause and re-run the specific stage.
 
-## 5. Google Sheet as the Intake Queue
+## Requirements
 
-### Required Columns (minimum)
+- **OS:** Ubuntu LTS (desktop is recommended)
+- **Python:** 3.10+ with `venv`
+- **Browser:** Brave (beta recommended) with remote debugging enabled
+- **APIs:**
+  - Google Sheets (service account)
+  - OpenAI API key
 
-| Column | Purpose                                       |
-| ------ | --------------------------------------------- |
-| A      | URL                                           |
-| B      | status (NEW / FETCHING / DONE / ERROR)        |
-| F      | json_path (written by agent.py)               |
-| I      | ai_status (CONDENSING / AI_READY / AI_FAILED) |
-| J      | ai_input_path                                 |
-| K      | ai_error                                      |
-
-The Sheet acts as a **state machine**, not a database.
-
----
-
-## 6. Worker A: Fetch + Capture (`agent.py`)
-
-### Responsibilities
-
-* Poll Google Sheet
-* Identify new URLs
-* Fetch via HTTP **or** Brave browser fallback
-* Extract:
-
-  * final URL
-  * clean text
-  * metadata
-* Write **ground‑truth JSON** to `out/`
-* Update Sheet status
-
-### Key Design Choice
-
-> **Never discard data at this stage.**
-
-The capture JSON is sacred. Everything else is derived from it.
-
----
-
-## 7. Reducer: Capture → AI Input (`reduce4ai.py`)
-
-### Purpose
-
-Create a **clean, minimal, AI‑ready envelope** without losing information.
-
-### Input
-
-* `out/YYYY/MM/DD/*.json`
-
-### Output
-
-* `out_ai/*.ai_input.json`
-
-### What It Keeps
-
-* Canonical URL
-* Domain
-* Site name
-* Published / modified hints
-* Full extracted text
-* Character & word counts
-
-### What It Removes
-
-* Raw HTML
-* Massive meta dumps
-* Browser artifacts
-
-This file is the **single source of truth for AI calls**.
-
----
-
-## 8. Why the AI Stage Is Split in Two
-
-### Motivation
-
-* Cost control
-* Token limits
-* Better determinism
-* Clear responsibility boundaries
-
-### AI Call #1: Metadata Only
-
-* No body text
-* Classifies content
-* Sets taxonomy fields
-* Populates SCF identity fields
-
-### AI Call #2: Claims Only
-
-* Full text
-* Extracts atomic factual statements
-* **No verdicts, no scoring**
-
-This makes later fact‑checking its own independent pipeline.
-
----
-
-## 9. AI Call #1: Metadata (`call_openai_meta.py`)
-
-### Input
-
-* `out_ai_meta/*.meta_input.json`
-
-### Output
-
-* `out_meta/*.meta_parsed.json`
-
-### AI Is Allowed To Decide
-
-* content_mode
-* language
-* workflow_status
-* intake_kind
-
-### AI Is NOT Allowed To Guess
-
-These are hard‑filled in post‑processing:
-
-* domain
-* site_name
-* collected_at_utc
-* published_at
-* modified_time
-* char_count / word_count
-
----
-
-## 10. AI Call #2: Claims (`call_openai_claims.py`)
-
-### Input
-
-* `out_ai/*.ai_input.json`
-* `out_meta/*.meta_parsed.json`
-
-### Output
-
-* `out_claims/*.claims_parsed.json`
-
-### Claims Structure
-
-Each claim is:
-
-```json
-{
-  "claim_text": "Atomic, checkable statement",
-  "claim_type": "event | quantity | date_time | quote | …"
-}
-```
-
-No verdicts. No confidence scores. No sources. Those come later.
-
----
-
-## 11. Merge Stage (`merge_xaio.py`)
-
-### Purpose
-
-Create a **final WP‑ready JSON** aligned exactly to SCF fields.
-
-### Output
-
-* `out_xaio/*.xaio_parsed.json`
-
-This file can be:
-
-* Written directly to WordPress
-* Stored for later verification
-* Reprocessed with new scoring models
-
----
-
-## 12. Systemd Services (Always‑On Behavior)
-
-### Timers
-
-* `url-agent.timer` → fetch & capture
-* `condense-agent.timer` → reduce & AI prep
-* `ai-agent.timer` → meta + claims + merge outputs
-
-### Enable (recommended)
+## Install
 
 ```bash
-systemctl --user enable --now url-agent.timer
-systemctl --user enable --now condense-agent.timer
-systemctl --user enable --now ai-agent.timer
+git clone https://github.com/sherafyk/xAIO-URL-Agent.git
+cd xAIO-URL-Agent
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### Safety
-
-* `flock` prevents overlapping runs
-* Each worker is idempotent
-
----
-
-## 13. Development & Debugging
-
-### Manual Runs
+Copy config templates:
 
 ```bash
-python agent.py
-python reduce4ai.py out/…json
-python call_openai_meta.py …
-python call_openai_claims.py …
+cp config/config.example.yaml config.yaml
+cp .env.example .env
 ```
 
-### Logs
+## Configuration
+
+### Config file (`config.yaml`)
+
+Edit `config.yaml` to set:
+
+- Google Sheet ID and column mappings
+- Output directories
+- Prompt set IDs
+- SQLite path
+
+### Secrets
+
+Place your Sheets credentials at:
+
+```
+secrets/service_account.json
+```
+
+### Environment variables (`.env`)
+
+Key environment variables:
+
+- `OPENAI_API_KEY`
+- `WP_USERNAME`, `WP_APP_PASSWORD`
+- `XAIO_CONFIG_PATH` (optional; defaults to `config.yaml`)
+- `XAIO_LOG_LEVEL` (default `INFO`)
+- `XAIO_LOG_FILE` (default `.runtime/logs/xaio.log`)
+
+Load environment variables:
 
 ```bash
-journalctl --user -u url-agent.service -f
-journalctl --user -u condense-agent.service -f
+source .env
 ```
 
-### Dashboard
+## Logging
+
+All services write to **stdout** and **a timestamped log file**. By default, logs are written to:
+
+```
+.runtime/logs/xaio.log
+```
+
+Override with:
+
+```
+XAIO_LOG_FILE="/path/to/xaio.log"
+```
+
+## Running the Pipeline
+
+### Manual runs
 
 ```bash
-url-agent-status
+source venv/bin/activate
+python src/agent.py --config config.yaml
+python src/condense_queue.py --config config.yaml
+python src/ai_queue.py --config config.yaml
+```
+
+You can also run the entire pipeline runner:
+
+```bash
+python src/pipeline_run.py --config config.yaml
+```
+
+### Update + restart helpers
+
+```bash
+chmod +x scripts/update_and_restart.sh
+./scripts/update_and_restart.sh
+```
+
+## Systemd Services
+
+### Install (recommended for long-running use)
+
+```bash
+chmod +x scripts/install_systemd_user.sh
+./scripts/install_systemd_user.sh
+systemctl --user daemon-reload
+systemctl --user enable --now pipeline.timer
+```
+
+### Symlink units from repo (advanced)
+
+```bash
+chmod +x scripts/deploy_systemd_from_repo.sh
+./scripts/deploy_systemd_from_repo.sh
+```
+
+This makes the repo the source of truth for systemd unit files.
+
+### Monitor
+
+```bash
+systemctl --user status pipeline.service
+journalctl --user -u pipeline.service -f
+```
+
+## Diagnostics & Troubleshooting
+
+### 1) Verify unit files are valid
+
+```bash
+systemd-analyze verify systemd/user/pipeline.service
+```
+
+### 2) Check for masked or missing units
+
+```bash
+systemctl --user list-unit-files | rg xaio
+systemctl --user status pipeline.service
+```
+
+### 3) Inspect logs
+
+```bash
+journalctl --user -u pipeline.service -n 200 --no-pager
+cat .runtime/logs/xaio.log | tail -n 200
+```
+
+### 4) Confirm your repo path
+
+Systemd unit templates default to `%h/xAIO-URL-Agent`. If your repo lives elsewhere, re-install from the correct directory:
+
+```bash
+cd /path/to/xAIO-URL-Agent
+./scripts/install_systemd_user.sh
+systemctl --user daemon-reload
+```
+
+## Common Fixes
+
+### "Unit has a bad unit file setting"
+
+Cause: invalid settings (often environment variables in `EnvironmentFile=` paths).
+
+Fix:
+
+1. Update to the latest repo.
+2. Reinstall systemd units:
+
+```bash
+./scripts/install_systemd_user.sh
+systemctl --user daemon-reload
+```
+
+### "Unit is masked"
+
+Unmask and re-enable:
+
+```bash
+systemctl --user unmask pipeline.service pipeline.timer
+systemctl --user enable --now pipeline.timer
+```
+
+### "Unit not found"
+
+The unit files were not installed or not loaded:
+
+```bash
+./scripts/install_systemd_user.sh
+systemctl --user daemon-reload
+systemctl --user start pipeline.service
 ```
 
 ---
 
-## 14. Design Philosophy (Important)
-
-* **Capture first, interpret later**
-* **Never overwrite source truth**
-* **AI is a parser, not an authority**
-* **Every stage should be replayable**
-* **Claims extraction ≠ fact‑checking**
-
-This pipeline is intentionally conservative. That’s a feature.
-
----
-
-## 15. Where This Goes Next
-
-Planned future workers:
-
-* Claim verification
-* Source retrieval
-* Cross‑document contradiction detection
-* Trust & integrity scoring
-* Public xAIO compliance signals
-
----
-
-## 16. TL;DR for New Devs
-
-1. URLs go into a Google Sheet
-2. The local machine fetches them
-3. Raw JSON is saved forever
-4. AI input is reduced & structured
-5. Metadata and claims are extracted separately
-6. Outputs map 1‑to‑1 to WordPress fields
-
-If you understand that, you understand the project.
-****
+If you encounter issues beyond these steps, run `scripts/doctor.sh` and include the output along with the relevant sections from `.runtime/logs/xaio.log` and `journalctl`.
