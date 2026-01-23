@@ -14,6 +14,7 @@ Pipeline stage 3:
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import logging
 import subprocess
@@ -34,10 +35,12 @@ from tenacity import (
     wait_exponential,
 )
 
+from env_bootstrap import load_repo_env
 from strip_content_for_meta import load_json, write_meta_input
 from logging_utils import elapsed_ms, log_event, setup_logging
 from sheets_batch import batch_update_row_cells
 
+load_repo_env()
 logger = setup_logging("ai_queue")
 
 
@@ -281,7 +284,7 @@ def mark_stage(output_path: Path, sha: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", "config.yaml"))
     args = ap.parse_args()
 
     cfg = load_config(args.config)

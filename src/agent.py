@@ -23,8 +23,11 @@ from tenacity import (
     wait_exponential,
 )
 
+from env_bootstrap import load_repo_env
 from logging_utils import elapsed_ms, log_event, setup_logging
 from sheets_batch import batch_update_row_cells
+
+load_repo_env()
 
 logger = setup_logging("agent")
 
@@ -557,6 +560,13 @@ def run_once(cfg: Config) -> None:
 
 
 if __name__ == "__main__":
-    cfg = load_config("config.yaml")
+    import argparse
+    import os
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", "config.yaml"))
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
     run_once(cfg)
     log_event(logger, stage="exit", message="run complete")
