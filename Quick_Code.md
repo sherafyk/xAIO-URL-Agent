@@ -51,6 +51,8 @@ chmod +x scripts/update_and_restart.sh
 ```
 pip install -r requirements.txt
 ```
+
 ```
+chmod +x scripts/deploy_systemd_from_repo.sh
 ./scripts/deploy_systemd_from_repo.sh
 ```
