@@ -16,6 +16,7 @@ def main():
     run([py, "src/agent.py"])
     run([py, "src/condense_queue.py"])
     run([py, "src/ai_queue.py"])
+    run([py, "src/wp_upload_queue.py"])
 
 if __name__ == "__main__":
     main()
