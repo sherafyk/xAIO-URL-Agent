@@ -16,6 +16,12 @@ for unit in "$SRC_DIR"/*.service "$SRC_DIR"/*.timer; do
 done
 shopt -u nullglob
 
+echo "Unmasking user systemd units if needed..."
+for unit in "$SRC_DIR"/*.service "$SRC_DIR"/*.timer; do
+  unit_name="$(basename "$unit")"
+  systemctl --user unmask "$unit_name" >/dev/null 2>&1 || true
+done
+
 systemctl --user daemon-reload
 
 echo "Enable timers:"
