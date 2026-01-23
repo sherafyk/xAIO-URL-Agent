@@ -17,10 +17,12 @@ logger = setup_logging("merge_xaio")
 def load_json(p: Path) -> Any:
     return json.loads(p.read_text(encoding="utf-8"))
 
-def require_meta_fields(meta: Dict[str, Any], fields: list[str]) -> None:
-    missing = [field for field in fields if field not in meta]
-    if missing:
-        raise ValueError(f"meta_parsed missing required fields: {', '.join(missing)}")
+def claim_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, str):
+        return 1 if value.strip() else 0
+    return 0
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -44,8 +46,6 @@ def main() -> int:
         ai_input: Dict[str, Any] = load_json(ai_path)
         meta: Dict[str, Any] = load_json(meta_path)
         claims: Dict[str, Any] = load_json(claims_path)
-
-        require_meta_fields(meta, ["canonical_url", "domain", "site_name"])
 
         out: Dict[str, Any] = {}
         out.update(meta)
@@ -82,7 +82,7 @@ def main() -> int:
             stage="merge_done",
             item_id=item_id,
             elapsed_ms_value=elapsed_ms(start_time),
-            message=f"wrote={out_path} claims={len(out.get('claims', []))}",
+            message=f"wrote={out_path} claims={claim_count(out.get('claims'))}",
         )
         return 0
     except Exception as exc:
