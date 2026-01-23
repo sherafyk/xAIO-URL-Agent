@@ -1,140 +1,31 @@
-# xAIO URL Agent
+Alright. I’ve done exactly what you asked.
 
-A local, browser-backed pipeline for capturing URL content, reducing it for AI parsing, extracting metadata/claims, and publishing WordPress-ready outputs.
+I created a **ridiculously comprehensive, no-excuses, step-by-step README** in the canvas. This is the “source of truth” document you were asking for — first-time setup, manual runs, systemd, failure recovery, debugging order, the whole damn thing. No piecemeal instructions. No guessing. No tribal knowledge.
 
-This repo is designed for reliability and traceability:
-- Each stage writes artifacts to disk
-- Each stage is safe to re-run (idempotent-ish)
-- The pipeline is split into small AI calls (meta + claims)
+A few important notes so you don’t keep bleeding time:
 
-## Overview
+### What this README is meant to do
 
-This project watches a Google Sheet for URLs, fetches pages using HTTP or a real browser (Brave via CDP), stores a canonical capture JSON, then runs staged AI parsing (metadata and claims) to produce WordPress-ready output aligned to SCF fields. The final stage publishes to WordPress via the xAIO ingest endpoint.
+* Someone with **zero context** can get this running
+* You can come back in 6 months, half asleep, and still know exactly what to do
+* When something breaks, it tells you **where to look first** instead of panic-diffing files
 
-## Architecture
+### About the pipeline service failure
 
-Pipeline stages and artifacts:
+That README explicitly forces a **manual-run-first discipline**.
+systemd failures are almost never “new bugs” — they’re:
 
-```
-Google Sheet (URL queue)
-        ↓
-agent.py        → out/YYYY/MM/DD/*.json
-        ↓
-reduce4ai.py    → out_ai/*.ai_input.json
-        ↓
-strip_content_for_meta.py → out_ai_meta/*.meta_input.json
-        ↓
-call_openai_meta.py       → out_meta/*.meta_parsed.json
-        ↓
-call_openai_claims.py     → out_claims/*.claims_parsed.json
-        ↓
-merge_xaio.py             → out_xaio/*.xaio_parsed.json
-        ↓
-wp_upload_queue.py        → WordPress (xaio/v1/ingest)
-```
+* missing `.runtime/.env`
+* wrong config path
+* stale venv
+* systemd running before bootstrap
 
-## The only place you should edit local settings
+All of those are now documented and ordered so you don’t thrash.
 
-To keep things clean, **all local config & secrets live in one gitignored folder**:
+### Next concrete action (do this, nothing else)
 
-```
-.runtime/
-  .env                          # ALL env vars + secrets (OpenAI, WP, etc.)
-  config.yaml                   # runtime config
-  secrets/service_account.json  # Google Sheets service account key
-```
+1. Read **sections 4 → 8** in order
+2. Run `doctor.sh`
+3. Run the pipeline **manually**
+4. Only then touch systemd
 
-Nothing else in the repo should need per-machine edits.
-
-## Quick start (Ubuntu)
-
-```bash
-chmod +x scripts/*.sh
-./scripts/bootstrap_ubuntu.sh
-```
-
-Then:
-
-1) Edit:
-- `.runtime/.env`
-- `.runtime/config.yaml`
-
-2) Replace:
-- `.runtime/secrets/service_account.json`
-
-3) Run:
-
-```bash
-./scripts/doctor.sh
-source venv/bin/activate
-python src/pipeline_run.py --config .runtime/config.yaml
-```
-
-## Manual install
-
-```bash
-git clone https://github.com/sherafyk/xAIO-URL-Agent.git
-cd xAIO-URL-Agent
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Create .runtime/ + templates
-./scripts/init_runtime.sh
-
-# Edit runtime config
-tool="${EDITOR:-nano}"
-$tool .runtime/.env
-$tool .runtime/config.yaml
-```
-
-## Configuration
-
-### Config file (`.runtime/config.yaml`)
-
-Edit `.runtime/config.yaml` to set:
-- Google Sheet URL + worksheet name
-- Column mappings
-- Output directories
-- Fetch settings (CDP endpoint, etc.)
-- WordPress ingest URL
-- AI models + reasoning effort
-
-### Environment variables (`.runtime/.env`)
-
-Common variables:
-- `OPENAI_API_KEY`
-- `WP_USERNAME`, `WP_APP_PASSWORD` (for WordPress ingest)
-- `XAIO_LOG_LEVEL`, `XAIO_LOG_FILE`
-
-You normally **do not** need to `source` this file manually because every Python entrypoint calls `load_repo_env()` and loads it automatically.
-
-## Systemd services
-
-Install user services/timers:
-
-```bash
-./scripts/install_systemd_user.sh
-systemctl --user daemon-reload
-systemctl --user enable --now pipeline.timer
-```
-
-Monitor:
-
-```bash
-systemctl --user status pipeline.service
-journalctl --user -u pipeline.service -f
-```
-
-## Troubleshooting
-
-Run:
-
-```bash
-./scripts/doctor.sh
-```
-
-Common issues:
-- **Sheets access**: ensure the service account email has edit access to the sheet.
-- **CDP not reachable**: ensure Brave is running with remote debugging enabled (port in `.runtime/config.yaml`).
-- **OpenAI errors**: verify `OPENAI_API_KEY` in `.runtime/.env` and that the model name exists for your account.
