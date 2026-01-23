@@ -28,6 +28,9 @@ import yaml
 
 from logging_utils import elapsed_ms, log_event, setup_logging
 
+from env_bootstrap import load_repo_env
+load_repo_env()
+
 logger = setup_logging("wp_upload_queue")
 
 
