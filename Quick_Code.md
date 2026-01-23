@@ -37,6 +37,7 @@ You’ll likely see things like:
 
 maybe local script edits
 
+
 possibly output dirs if something accidentally got tracked
 
 👉 Important:
@@ -47,4 +48,7 @@ chmod +x scripts/update_and_restart.sh
 ./scripts/update_and_restart.sh  
 ```
 
+```
+pip install -r requirements.txt
+```
 
