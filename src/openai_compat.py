@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import warnings
 from typing import Any, Dict, Optional, Tuple, Type
 
 from pydantic import BaseModel
@@ -27,17 +28,14 @@ def _openai_env_debug() -> str:
     return f"python={sys.executable} openai_version={version} openai_path={location}"
 
 
-def _ensure_responses_api(client: Any) -> None:
-    if _has_responses(client):
-        return
+def _warn_missing_responses_api() -> None:
     if os.getenv("XAIO_OPENAI_ALLOW_FALLBACK", "").strip():
         return
     debug = _openai_env_debug()
-    raise RuntimeError(
-        "OpenAI responses API not available. "
-        "This usually means the service is running from a different Python environment "
-        "than the one with requirements installed. "
-        f"Set XAIO_OPENAI_ALLOW_FALLBACK=1 to allow a chat.completions fallback. ({debug})"
+    warnings.warn(
+        "OpenAI responses API not available. Falling back to chat.completions. "
+        "Set XAIO_OPENAI_ALLOW_FALLBACK=1 to suppress this warning. "
+        f"({debug})"
     )
 
 
@@ -91,7 +89,7 @@ def structured_parse(
             parsed = None
         return parsed, raw
 
-    _ensure_responses_api(client)
+    _warn_missing_responses_api()
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -152,7 +150,7 @@ def json_schema_response(
         raw = resp.model_dump() if hasattr(resp, "model_dump") else json.loads(resp.json())
         output_text = getattr(resp, "output_text", "") or ""
     else:
-        _ensure_responses_api(client)
+        _warn_missing_responses_api()
         try:
             resp = client.chat.completions.create(
                 model=model,

@@ -17,7 +17,7 @@ A local, browser-backed pipeline for capturing URL content, reducing it for AI p
 
 ## Overview
 
-This project watches a Google Sheet for URLs, fetches pages using HTTP or a real browser (Brave via CDP), stores a canonical capture JSON, then runs staged AI parsing (metadata and claims) to produce WordPress-ready output aligned to SCF fields. The pipeline emphasizes:
+This project watches a Google Sheet for URLs, fetches pages using HTTP or a real browser (Brave via CDP), stores a canonical capture JSON, then runs staged AI parsing (metadata and claims) to produce WordPress-ready output aligned to SCF fields. The final stage publishes to WordPress via the xAIO ingest endpoint so content/contributor/organization records stay in sync. The pipeline emphasizes:
 
 - **Ground-truth captures** (stored before AI touches anything).
 - **Small, predictable AI calls** instead of a single monolithic call.
@@ -41,6 +41,8 @@ call_openai_meta.py       → out_meta/*.meta_parsed.json
 call_openai_claims.py     → out_claims/*.claims_parsed.json
         ↓
 merge_xaio.py             → out_xaio/*.xaio_parsed.json
+        ↓
+wp_upload_queue.py        → WordPress (xaio/v1/ingest)
 ```
 
 Each stage is replayable. If something fails, fix the root cause and re-run the specific stage.
@@ -95,7 +97,7 @@ secrets/service_account.json
 Key environment variables:
 
 - `OPENAI_API_KEY`
-- `WP_USERNAME`, `WP_APP_PASSWORD`
+- `WP_USERNAME`, `WP_APP_PASSWORD` (for WordPress ingest)
 - `XAIO_CONFIG_PATH` (optional; defaults to `config.yaml`)
 - `XAIO_LOG_LEVEL` (default `INFO`)
 - `XAIO_LOG_FILE` (default `.runtime/logs/xaio.log`)
@@ -129,6 +131,7 @@ source venv/bin/activate
 python src/agent.py --config config.yaml
 python src/condense_queue.py --config config.yaml
 python src/ai_queue.py --config config.yaml
+python src/wp_upload_queue.py --config config.yaml
 ```
 
 You can also run the entire pipeline runner:
@@ -136,6 +139,14 @@ You can also run the entire pipeline runner:
 ```bash
 python src/pipeline_run.py --config config.yaml
 ```
+
+### WordPress publishing
+
+The WordPress stage (`wp_upload_queue.py`) reads `out_xaio/*.xaio_parsed.json` and calls the
+`/wp-json/xaio/v1/ingest` endpoint to upsert content, contributor, and organization records.
+Ensure your WordPress site has the xAIO ingest MU-plugin installed and that your config
+includes `wordpress.base_url` + `wordpress.ingest_path`. The request uses `WP_USERNAME` and
+`WP_APP_PASSWORD` for Basic Auth (Application Passwords are recommended).
 
 ### Update + restart helpers
 
