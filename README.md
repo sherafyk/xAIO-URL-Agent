@@ -166,6 +166,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now pipeline.timer
 ```
 
+### Ensure units are installed (quick fix)
+
+If `pipeline.service` is missing or pointing at the wrong repo path, run:
+
+```bash
+chmod +x scripts/ensure_systemd_user.sh
+./scripts/ensure_systemd_user.sh
+```
+
 ### Symlink units from repo (advanced)
 
 ```bash
