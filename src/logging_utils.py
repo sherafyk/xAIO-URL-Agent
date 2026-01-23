@@ -3,16 +3,26 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any, Optional
+
+_LOGGING_CONFIGURED = False
 
 
 def setup_logging(name: str) -> logging.Logger:
-    level_name = os.getenv("XAIO_LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    global _LOGGING_CONFIGURED
+    if not _LOGGING_CONFIGURED:
+        level_name = os.getenv("XAIO_LOG_LEVEL", "INFO").upper()
+        level = getattr(logging, level_name, logging.INFO)
+        log_path = Path(os.getenv("XAIO_LOG_FILE", ".runtime/logs/xaio.log"))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        handlers = [logging.StreamHandler()]
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+        logging.basicConfig(level=level, handlers=handlers, format="%(asctime)s %(levelname)s %(message)s")
+        _LOGGING_CONFIGURED = True
     return logging.getLogger(name)
 
 
