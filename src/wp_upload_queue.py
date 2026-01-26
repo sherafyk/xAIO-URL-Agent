@@ -344,7 +344,7 @@ def main() -> int:
             "canonical_url": canonical_url,
             "content_mode": content_mode,
             "content_title": safe_str(xaio.get("url_content_title") or xaio.get("title") or ""),
-            "post_body": body_text,
+            "extracted_text_full": body_text,
             "contributor_name": contributor_name,
             "org_name": org_name,
             "org_domain": domain,
