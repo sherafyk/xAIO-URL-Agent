@@ -144,11 +144,8 @@ class AIQueueConfig:
     out_claims_dir: str
     out_xaio_dir: str
 
-    scf_export_path: str
     meta_model: str
-    meta_reasoning_effort: Optional[str]
     claims_model: str
-    claims_reasoning_effort: Optional[str]
 
     max_per_run: int
 
@@ -188,11 +185,8 @@ def load_config(path: str = "config.yaml") -> AIQueueConfig:
         out_meta_dir=paths.get("out_meta_dir", "./out_meta"),
         out_claims_dir=paths.get("out_claims_dir", "./out_claims"),
         out_xaio_dir=paths.get("out_xaio_dir", "./out_xaio"),
-        scf_export_path=ai_cfg.get("scf_export_path", "config/scf-export-content.json"),
         meta_model=ai_meta.get("model", "gpt-5-nano"),
-        meta_reasoning_effort=ai_meta.get("reasoning_effort", "minimal"),
         claims_model=ai_claims.get("model", "gpt-5-nano"),
-        claims_reasoning_effort=ai_claims.get("reasoning_effort", "minimal"),
         max_per_run=int(ai_queue_cfg.get("max_per_run", 50)),
     )
 
@@ -227,15 +221,11 @@ def run_call_openai_meta(meta_input_path: Path, cfg: AIQueueConfig) -> subproces
         sys.executable,
         str(script),
         str(meta_input_path),
-        "--scf-export",
-        cfg.scf_export_path,
         "--outdir",
         cfg.out_meta_dir,
         "--model",
         cfg.meta_model,
     ]
-    if cfg.meta_reasoning_effort:
-        cmd.extend(["--reasoning-effort", cfg.meta_reasoning_effort])
     return run_subprocess(cmd)
 
 
@@ -246,15 +236,11 @@ def run_call_openai_claims(ai_input_path: Path, meta_parsed_path: Path, cfg: AIQ
         str(script),
         str(ai_input_path),
         str(meta_parsed_path),
-        "--scf-export",
-        cfg.scf_export_path,
         "--outdir",
         cfg.out_claims_dir,
         "--model",
         cfg.claims_model,
     ]
-    if cfg.claims_reasoning_effort:
-        cmd.extend(["--reasoning-effort", cfg.claims_reasoning_effort])
     return run_subprocess(cmd)
 
 

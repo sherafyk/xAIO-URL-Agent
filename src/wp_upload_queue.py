@@ -217,52 +217,26 @@ def topics_openai(text: str, k: int = 8) -> List[str]:
     Requires OPENAI_API_KEY in environment, which you already use elsewhere.
     """
     from openai import OpenAI
-    from openai_compat import json_schema_response
+    from openai_compat import chat_completion_text
     client = OpenAI()
 
     snippet = (text or "")[:8000]  # keep it small & cheap
-
-    schema = {
-        "name": "topics_schema",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "topics": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 0,
-                    "maxItems": k,
-                }
-            },
-            "required": ["topics"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    }
-
     sys = (
         "Extract concise topical tags from the text. "
-        "Return 3–8 short topics (2–4 words), title case, no duplicates."
+        "Return a short plain-text list of topics separated by commas."
     )
 
-    data, _raw = json_schema_response(
+    raw = chat_completion_text(
         client,
         model="gpt-4.1-mini",
         system_prompt=sys,
         user_content=snippet,
-        json_schema=schema,
     )
-    topics = [t.strip() for t in data.get("topics", []) if t and t.strip()]
-    # dedupe
-    uniq = []
-    seen = set()
-    for t in topics:
-        key = t.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        uniq.append(t)
-    return uniq[:k]
+
+    topic_text = (raw or "").strip()
+    if not topic_text:
+        return []
+    return [topic_text[:200]]
 
 
 # ---------------------------
@@ -350,6 +324,8 @@ def main() -> int:
         contributor_name = safe_str(authors[0]).strip() if authors else ""
 
         body_text = safe_str(xaio.get("extracted_text_full", "")).strip()
+        meta_raw = safe_str(xaio.get("meta", "")).strip()
+        claims_raw = safe_str(xaio.get("claims", "")).strip()
 
         # Topics
         topics: List[str] = []
@@ -373,6 +349,8 @@ def main() -> int:
             "org_name": org_name,
             "org_domain": domain,
             "topics": topics,
+            "meta": meta_raw,
+            "claims": claims_raw,
         }
 
         # Mark WP_RUNNING

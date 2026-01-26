@@ -10,5 +10,4 @@ python-dateutil==2.9.0.post0
 tenacity==9.0.0
 pyyaml==6.0.2
 openai==1.55.3
-pydantic==2.8.2
 python-dotenv
