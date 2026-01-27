@@ -593,25 +593,14 @@ def main() -> int:
         out["text_truncated"] = facts["text_truncated"]
         out["text_sha256"] = facts["text_sha256"]
 
-        # Run any missing panels.
-        for k in PANEL_ORDER:
-            if isinstance(out.get(k), str) and out.get(k).strip():
-                continue
-
+        # Run panels in ONE call (Option 1) if any are missing.
+        if not all_panels_present(out):
             t0 = time.monotonic()
-            log_event(logger, stage="panel_start", item_id=item_id, message=k)
-            panel_text = call_panel(args.model, shared_wrapper=shared_wrapper, panel_prompt=PANEL_PROMPTS[k])
-            out[k] = (panel_text or "").strip()
-            log_event(
-                logger,
-                stage="panel_done",
-                item_id=item_id,
-                elapsed_ms_value=elapsed_ms(t0),
-                message=k,
-            )
-
-            # Persist after each panel so a later retry can resume.
-            write_json(out_path, out)
+            log_event(logger, stage="onecall_start", item_id=item_id, message="buffers_onecall")
+            panels = call_all_panels_onecall(args.model, shared_wrapper=shared_wrapper)
+            for k in PANEL_ORDER:
+                out[k] = panels.get(k, "").strip()
+            log_event(logger, stage="onecall_done", item_id=item_id, elapsed_ms_value=elapsed_ms(t0), message="buffers_onecall")
 
         # Final write (pretty JSON)
         write_json(out_path, out)
