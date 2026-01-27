@@ -7,6 +7,9 @@ RT="$REPO_DIR/.runtime"
 mkdir -p "$RT" "$RT/secrets" "$RT/logs" "$REPO_DIR/locks" "$REPO_DIR/out" "$REPO_DIR/out_ai" \
   "$REPO_DIR/out_ai_meta" "$REPO_DIR/out_meta" "$REPO_DIR/out_claims" "$REPO_DIR/out_xaio" "$REPO_DIR/out_wp"
 
+# NEW: buffered panel analysis output
+mkdir -p "$REPO_DIR/out_buffers"
+
 if [ ! -f "$RT/.env" ]; then
   if [ -f "$REPO_DIR/.env.example" ]; then
     cp "$REPO_DIR/.env.example" "$RT/.env"

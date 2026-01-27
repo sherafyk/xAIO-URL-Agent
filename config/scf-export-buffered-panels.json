@@ -1,0 +1,632 @@
+[
+    {
+        "key": "group_357a28a4fbfb4",
+        "title": "Content 4 - xAIO Analysis (Buffered Panels)",
+        "fields": [
+            {
+                "key": "field_e855979abdad4",
+                "label": "xAIO Analysis JSON (Canonical)",
+                "name": "aio_analysis_json",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "Store the full AI output as a single JSON object (canonical source of truth).\nInclude support_spans (sentence IDs like s12-s14) for traceability.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_ee0876601ad74",
+                "label": "xAIO Schema Version",
+                "name": "aio_schema_version",
+                "aria-label": "",
+                "type": "text",
+                "instructions": "Set to the schema version used by your extractor prompt (e.g., 0.1.0).",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "0.1.0",
+                "maxlength": "",
+                "placeholder": "",
+                "prepend": "",
+                "append": ""
+            },
+            {
+                "key": "field_44a031828e934",
+                "label": "xAIO Generated At",
+                "name": "aio_generated_at",
+                "aria-label": "",
+                "type": "date_time_picker",
+                "instructions": "Timestamp when the AI extraction was generated (UTC recommended).",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "display_format": "Y-m-d H:i:s",
+                "return_format": "Y-m-d H:i:s",
+                "first_day": 1,
+                "default_to_current_date": 0
+            },
+            {
+                "key": "field_7699c4f882624",
+                "label": "Summary (One-liner)",
+                "name": "aio_summary_one_liner",
+                "aria-label": "",
+                "type": "text",
+                "instructions": "Neutral summary <= 35 words. No opinions.\nPrompt cue: Write a one-sentence neutral summary of what the text is about.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "placeholder": "",
+                "prepend": "",
+                "append": ""
+            },
+            {
+                "key": "field_9687ef24da254",
+                "label": "Source Type (As classified)",
+                "name": "aio_signal_source_type",
+                "aria-label": "",
+                "type": "select",
+                "instructions": "Classify by how it reads: news\/gov\/ngo\/opinion\/social\/other.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "choices": {
+                    "news": "News",
+                    "gov": "Government",
+                    "ngo": "NGO",
+                    "opinion": "Opinion",
+                    "social": "Social",
+                    "other": "Other"
+                },
+                "default_value": false,
+                "return_format": "value",
+                "multiple": 0,
+                "allow_null": 0,
+                "ui": 0,
+                "ajax": 0,
+                "placeholder": "",
+                "create_options": 0,
+                "save_options": 0
+            },
+            {
+                "key": "field_1a2cf947c3694",
+                "label": "Evidence Density (Text-only)",
+                "name": "aio_signal_evidence_density",
+                "aria-label": "",
+                "type": "select",
+                "instructions": "Estimate from quotes, named sources, documents\/data, methods described.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "choices": {
+                    "low": "Low",
+                    "med": "Medium",
+                    "high": "High"
+                },
+                "default_value": false,
+                "return_format": "value",
+                "multiple": 0,
+                "allow_null": 0,
+                "ui": 0,
+                "ajax": 0,
+                "placeholder": "",
+                "create_options": 0,
+                "save_options": 0
+            },
+            {
+                "key": "field_2fec94e4da564",
+                "label": "Dispute Level (Text-internal)",
+                "name": "aio_signal_dispute_level_text_internal",
+                "aria-label": "",
+                "type": "select",
+                "instructions": "Rate based on explicit contestation\/uncertainty language in the text.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "choices": {
+                    "low": "Low",
+                    "med": "Medium",
+                    "high": "High"
+                },
+                "default_value": false,
+                "return_format": "value",
+                "multiple": 0,
+                "allow_null": 0,
+                "ui": 0,
+                "ajax": 0,
+                "placeholder": "",
+                "create_options": 0,
+                "save_options": 0
+            },
+            {
+                "key": "field_f48b7885163d4",
+                "label": "Anonymous Sourcing Usage",
+                "name": "aio_signal_anonymous_sourcing_usage",
+                "aria-label": "",
+                "type": "select",
+                "instructions": "None\/Limited\/Heavy based on the text.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "choices": {
+                    "none": "None",
+                    "limited": "Limited",
+                    "heavy": "Heavy"
+                },
+                "default_value": false,
+                "return_format": "value",
+                "multiple": 0,
+                "allow_null": 0,
+                "ui": 0,
+                "ajax": 0,
+                "placeholder": "",
+                "create_options": 0,
+                "save_options": 0
+            },
+            {
+                "key": "field_1928ab24d77d4",
+                "label": "Entities (Global)",
+                "name": "aio_entities",
+                "aria-label": "",
+                "type": "repeater",
+                "instructions": "Extract key people\/orgs\/governments\/groups\/locations mentioned in the text. Include support_spans.",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "layout": "table",
+                "pagination": 0,
+                "min": 0,
+                "max": 0,
+                "collapsed": "",
+                "button_label": "Add Row",
+                "rows_per_page": 20,
+                "sub_fields": [
+                    {
+                        "key": "field_789b5502afca4",
+                        "label": "Entity ID",
+                        "name": "entity_id",
+                        "aria-label": "",
+                        "type": "text",
+                        "instructions": "Stable ID like e01, e02...",
+                        "required": 0,
+                        "conditional_logic": 0,
+                        "wrapper": {
+                            "width": "",
+                            "class": "",
+                            "id": ""
+                        },
+                        "allow_in_bindings": 0,
+                        "default_value": "",
+                        "maxlength": "",
+                        "placeholder": "",
+                        "prepend": "",
+                        "append": "",
+                        "parent_repeater": "field_1928ab24d77d4"
+                    },
+                    {
+                        "key": "field_e9b1a79e55bb4",
+                        "label": "Name",
+                        "name": "name",
+                        "aria-label": "",
+                        "type": "text",
+                        "instructions": "Canonical name as it appears.",
+                        "required": 0,
+                        "conditional_logic": 0,
+                        "wrapper": {
+                            "width": "",
+                            "class": "",
+                            "id": ""
+                        },
+                        "allow_in_bindings": 0,
+                        "default_value": "",
+                        "maxlength": "",
+                        "placeholder": "",
+                        "prepend": "",
+                        "append": "",
+                        "parent_repeater": "field_1928ab24d77d4"
+                    },
+                    {
+                        "key": "field_e6ea12f695a74",
+                        "label": "Type",
+                        "name": "type",
+                        "aria-label": "",
+                        "type": "select",
+                        "instructions": "Select entity type.",
+                        "required": 0,
+                        "conditional_logic": 0,
+                        "wrapper": {
+                            "width": "",
+                            "class": "",
+                            "id": ""
+                        },
+                        "allow_in_bindings": 0,
+                        "choices": {
+                            "person": "Person",
+                            "org": "Organization",
+                            "government": "Government",
+                            "group": "Group",
+                            "location": "Location",
+                            "other": "Other"
+                        },
+                        "default_value": false,
+                        "return_format": "value",
+                        "multiple": 0,
+                        "allow_null": 0,
+                        "ui": 0,
+                        "ajax": 0,
+                        "placeholder": "",
+                        "create_options": 0,
+                        "save_options": 0,
+                        "parent_repeater": "field_1928ab24d77d4"
+                    },
+                    {
+                        "key": "field_42261920a9ee4",
+                        "label": "Aliases (comma-separated)",
+                        "name": "aliases",
+                        "aria-label": "",
+                        "type": "text",
+                        "instructions": "Optional: alternate names\/abbreviations.",
+                        "required": 0,
+                        "conditional_logic": 0,
+                        "wrapper": {
+                            "width": "",
+                            "class": "",
+                            "id": ""
+                        },
+                        "allow_in_bindings": 0,
+                        "default_value": "",
+                        "maxlength": "",
+                        "placeholder": "",
+                        "prepend": "",
+                        "append": "",
+                        "parent_repeater": "field_1928ab24d77d4"
+                    },
+                    {
+                        "key": "field_f2c79461ccff4",
+                        "label": "Support Spans",
+                        "name": "support_spans",
+                        "aria-label": "",
+                        "type": "textarea",
+                        "instructions": "Sentence IDs or char offsets showing where this entity appears.",
+                        "required": 0,
+                        "conditional_logic": 0,
+                        "wrapper": {
+                            "width": "",
+                            "class": "",
+                            "id": ""
+                        },
+                        "allow_in_bindings": 0,
+                        "default_value": "",
+                        "maxlength": "",
+                        "rows": "",
+                        "placeholder": "",
+                        "new_lines": "",
+                        "parent_repeater": "field_1928ab24d77d4"
+                    }
+                ]
+            },
+            {
+                "key": "field_e07cd0152c724",
+                "label": "1) Speech-act \/ Intent (Buffer)",
+                "name": "aio_panel_01_intent_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing what the text is trying to do (speech-act), not whether it is true.\nEnd with a small parse block for downstream parsing.\nRequired ending format:\n[PARSE]\nprimary_intent=<one of: reporting|explaining|arguing|warning_forecasting|justifying_excusing|attacking_defending_reputation|mobilizing_call_to_action>\nsecondary_intents=<comma list or none>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\nneeds_verification=<none or short phrase>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_995393f8464c4",
+                "label": "2) Narrative \/ Story Spine (Buffer)",
+                "name": "aio_panel_02_story_spine_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) summarizing the narrative spine and causal story AS PRESENTED.\nInclude: central conflict, turning point\/why it matters, root cause (as presented), solution path (as presented).\nEnd with:\n[PARSE]\ncentral_conflict=<short>\nturning_point=<short>\nroot_cause_as_presented=<short>\nsolution_path_as_presented=<short>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_e6b809378fac4",
+                "label": "3) Definitions & Category Choices (Buffer)",
+                "name": "aio_panel_03_definitions_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing key terms\/labels and how the author implicitly defines or uses them.\nInclude notable category assignments (who counts as what) and any equivalences (X~Y) that steer interpretation.\nEnd with:\n[PARSE]\nkey_terms=<comma list up to 10>\ncategory_assignments_hint=<short>\nequivalences_hint=<short>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_d34b63649a6f4",
+                "label": "4) Evidence Posture & Sourcing Style (Buffer)",
+                "name": "aio_panel_04_evidence_posture_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing HOW the text treats evidence (not verifying it).\nCover: attribution (how often claims are sourced), hedging vs certainty, implied proof standard, verification moves shown, anonymous sourcing usage.\nEnd with:\n[PARSE]\nattribution_degree=<low|med|high>\nhedging_level=<low|med|high>\ncertainty_language_level=<low|med|high>\nimplied_proof_standard=<journalistic_balance|courtroom|activist_moral|mixed|unclear>\nverification_moves=<comma list or none>\nanonymous_sources_usage=<none|limited|heavy>\nevidence_gaps_hint=<short>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_fe48ff1ca7714",
+                "label": "5) Uncertainty, Unknowns & Disputed Terrain (Buffer)",
+                "name": "aio_panel_05_uncertainty_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) summarizing what the text itself marks as unclear\/unknown\/unconfirmed, and any explicit disputes (A says X, B says not-X).\nDo not add outside knowledge.\nEnd with:\n[PARSE]\nunknowns_count=<0-12>\ndisputed_points_count=<0-12>\nmissing_data_flags_hint=<short>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\nneeds_verification=<none or short phrase>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_ab643fd369034",
+                "label": "6) Omissions & Selection Effects (Buffer)",
+                "name": "aio_panel_06_omissions_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing measurable coverage gaps WITHOUT mind-reading.\nCover: whose voices are quoted vs absent, evidence types present vs plausibly expected but absent, time-window selection, alternative hypotheses not addressed, open questions.\nEnd with:\n[PARSE]\nquoted_stakeholders_hint=<comma list up to 8 or none>\nabsent_stakeholders_hint=<comma list up to 8 or none>\nevidence_types_present=<comma list: documents|data|video|audio|none>\nevidence_types_absent=<comma list or none>\ntime_window_selection=<short or none>\nopen_questions_count=<5-15 or 0>\nconfidence=<low|med|high>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_db2b8a2113b34",
+                "label": "7) Rhetoric, Framing & Persuasion Mechanics (Buffer)",
+                "name": "aio_panel_07_rhetoric_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing rhetoric\/framing signals neutrally.\nCover: dominant frames, tone, persuasion devices (e.g., moral language, authority cues), anecdote vs aggregate balance, any loaded language.\nEnd with:\n[PARSE]\ntone=<neutral|alarmed|empathetic|hostile|advocacy|mixed>\ndominant_frames=<comma list: security|humanitarian|legal|economic|cultural|political|other>\npersuasion_devices=<comma list or none>\nanecdote_vs_aggregate=<anecdote_heavy|balanced|data_heavy|unclear>\nloaded_language_hint=<comma list up to 10 or none>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_a8103e67c2904",
+                "label": "8) Normative Layer: Values & Prescriptions (Buffer)",
+                "name": "aio_panel_08_normative_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) separating descriptive claims from normative content.\nExtract value judgments (good\/bad, justified\/unjustified), prescriptions (what should happen), and implied moral framework.\nEnd with:\n[PARSE]\nvalue_judgments_count=<0+>\nprescriptions_count=<0+>\nmoral_frameworks=<comma list: rights_based|security_based|utilitarian|virtue|other|mixed>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_33dbc6a6e59a4",
+                "label": "9) Predictions & Commitments (Buffer)",
+                "name": "aio_panel_09_predictions_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) capturing forecasts and conditional statements that could be revisited later, plus any actor commitments reported.\nEnd with:\n[PARSE]\npredictions_count=<0-12>\ncommitments_count=<0-12>\ndominant_time_horizon=<days|weeks|months|years|unspecified>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_409004a7d4254",
+                "label": "10) Actor Map & Responsibility Attributions (Buffer)",
+                "name": "aio_panel_10_actor_map_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) describing the actor model AS PRESENTED.\nInclude: key actors, roles (initiator\/retaliator\/victim\/mediator\/etc.), relationships (ally\/adversary\/command), and responsibility attributions (blame\/credit\/causation\/legal responsibility) as claimed.\nEnd with:\n[PARSE]\nkey_actors_hint=<comma list up to 10>\nroles_hint=<short>\nrelationships_hint=<short>\nresponsibility_attributions_count=<0+>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_c9c135a6e64f4",
+                "label": "11) Internal Consistency (Buffer)",
+                "name": "aio_panel_11_internal_consistency_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) checking ONLY for within-text issues (no external fact-checking).\nLook for timeline inconsistencies, numerical mismatches, definition drift, or contradictions.\nEnd with:\n[PARSE]\nissues_count=<0-10>\nmost_severe_type=<timeline|number|definition|contradiction|none>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            },
+            {
+                "key": "field_9ad74121ebcf4",
+                "label": "12) Falsifiability: What Would Change My Mind? (Buffer)",
+                "name": "aio_panel_12_falsifiability_buffer",
+                "aria-label": "",
+                "type": "textarea",
+                "instructions": "AI output (1–2 paragraphs) listing 1–5 major theses in the text and what evidence would materially update or disconfirm each.\nMark this as analytic scaffolding.\nEnd with:\n[PARSE]\ntheses_count=<1-5 or 0>\ntop_thesis_hint=<short>\nconfidence=<low|med|high>\nsupport_spans=<comma sentence IDs or none>\nneeds_verification=<none or short phrase>\n[\/PARSE]",
+                "required": 0,
+                "conditional_logic": 0,
+                "wrapper": {
+                    "width": "",
+                    "class": "",
+                    "id": ""
+                },
+                "allow_in_bindings": 0,
+                "default_value": "",
+                "maxlength": "",
+                "rows": "",
+                "placeholder": "",
+                "new_lines": ""
+            }
+        ],
+        "location": [
+            [
+                {
+                    "param": "post_type",
+                    "operator": "==",
+                    "value": "content"
+                }
+            ]
+        ],
+        "menu_order": 0,
+        "position": "normal",
+        "style": "default",
+        "label_placement": "top",
+        "instruction_placement": "label",
+        "hide_on_screen": "",
+        "active": true,
+        "description": "xAIO: lightweight, single-call panel buffers (1–12) + global signals\/entities. Intended for later parsing\/enrichment.",
+        "show_in_rest": 0,
+        "display_title": ""
+    }
+]

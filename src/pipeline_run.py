@@ -5,7 +5,8 @@ Runs the full xAIO pipeline in order:
   1) agent.py           (capture URLs -> out/*.json)
   2) condense_queue.py  (reduce captures -> out_ai/*.ai_input.json)
   3) ai_queue.py        (OpenAI meta + claims -> out_xaio/*.xaio_parsed.json)
-  4) wp_upload_queue.py (publish -> WordPress)
+  4) buffer_panels_queue.py (OpenAI buffered panels -> out_buffers/*.buffers.json)
+  5) wp_upload_queue.py (publish -> WordPress)
 
 This wrapper exists so you can run one command locally or via systemd timers.
 It passes a single, explicit config path to every stage.
@@ -33,6 +34,7 @@ STAGES: List[Tuple[str, str]] = [
     ("capture", "agent.py"),
     ("condense", "condense_queue.py"),
     ("ai", "ai_queue.py"),
+    ("buffers", "buffer_panels_queue.py"),
     ("wp", "wp_upload_queue.py"),
 ]
 
@@ -56,7 +58,7 @@ def main() -> int:
     ap.add_argument(
         "--stages",
         default=",".join([name for name, _ in STAGES]),
-        help="Comma-separated subset of stages to run (capture,condense,ai,wp)",
+        help="Comma-separated subset of stages to run (capture,condense,ai,buffers,wp)",
     )
     args = ap.parse_args()
 

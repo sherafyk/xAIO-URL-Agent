@@ -40,6 +40,12 @@ columns_wp:
   wp_post_id: "V"
   wp_error: "W"
 
+# NEW: columns for buffered panel analysis (stage between XAIO_DONE and WP upload)
+columns_buffers:
+  buffers_status: "X"
+  buffers_path: "Y"
+  buffers_error: "Z"
+
 agent:
   # Required: output locations for capture agent.
   output_dir: "./out"
@@ -56,6 +62,10 @@ agent_ai:
 agent_ai_queue:
   # Optional: settings for ai_queue.py (defaults shown).
   max_per_run: 50
+
+agent_buffers_queue:
+  # NEW: settings for buffer_panels_queue.py (defaults shown).
+  max_per_run: 30
 
 fetch:
   # Optional: fetch behavior and browser settings.
@@ -76,6 +86,16 @@ ai:
     model: "gpt-5-nano"
     reasoning_effort: "minimal"
 
+  # NEW: buffered panel analysis (Option 2 = 12 separate calls)
+  buffers:
+    # Use a DIFFERENT model than meta/claims (per your requirement)
+    model: "gpt-4.1-mini"
+    # Stored into aio_schema_version + recorded in out_buffers JSON
+    schema_version: "0.1.0"
+    # Safety valve: cap the amount of extracted_text_full included in each call.
+    # 0 = no limit.
+    max_chars: 120000
+
 paths:
   # Optional: stage-specific output directories used by other scripts.
   out_capture_dir: "./out"
@@ -84,6 +104,7 @@ paths:
   out_meta_dir: "./out_meta"
   out_claims_dir: "./out_claims"
   out_xaio_dir: "./out_xaio"
+  out_buffers_dir: "./out_buffers"
   locks_dir: "./locks"
   sqlite_path: "./agent.db"
   secrets_dir: "./secrets"
