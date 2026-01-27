@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """call_openai_buffers.py
 
-Buffered Panels (Option 2: 12 separate calls)
+Buffered Panels (Option 1: ONE call returns all 12 panels as JSON)
 
 Input:  *.xaio_parsed.json (produced by merge_xaio.py)
 Output: *.buffers.json
