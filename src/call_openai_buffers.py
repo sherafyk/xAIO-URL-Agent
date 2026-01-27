@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """call_openai_buffers.py
 
-Buffered Panels (Option 2: 12 separate calls)
+Buffered Panels (Option 1: ONE call returns all 12 panels as JSON)
 
 Input:  *.xaio_parsed.json (produced by merge_xaio.py)
 Output: *.buffers.json
@@ -387,6 +387,120 @@ def call_panel(model: str, *, shared_wrapper: str, panel_prompt: str) -> str:
         user_content=user_content,
     )
 
+ONECALL_SYSTEM_PROMPT = """You are extracting structured analysis from a provided text.
+Do NOT use outside knowledge or web browsing.
+Describe things only "as presented in the text" (not verified truth).
+Be neutral, avoid moralizing.
+When uncertain, say so explicitly.
+Use only the provided sentence IDs (s1, s2, …) in support_spans.
+Output ONLY valid JSON (no markdown, no commentary).
+"""
+
+ONECALL_JSON_SHAPE = """Return a JSON object with EXACTLY these keys:
+- aio_panel_01_intent_buffer
+- aio_panel_02_story_spine_buffer
+- aio_panel_03_definitions_buffer
+- aio_panel_04_evidence_posture_buffer
+- aio_panel_05_uncertainty_buffer
+- aio_panel_06_omissions_buffer
+- aio_panel_07_rhetoric_buffer
+- aio_panel_08_normative_buffer
+- aio_panel_09_predictions_buffer
+- aio_panel_10_actor_map_buffer
+- aio_panel_11_internal_consistency_buffer
+- aio_panel_12_falsifiability_buffer
+
+Rules:
+- Each value must be plain text (1–2 short paragraphs), ending with that panel’s required [PARSE] block.
+- Use only sentence IDs s1, s2... in support_spans.
+- No markdown headers.
+- Do not include any other keys.
+"""
+
+def _extract_json_obj_text(s: str) -> str:
+    s = (s or "").strip()
+    # Remove code fences if present
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*```$", "", s)
+        s = s.strip()
+    # If it contains extra text, trim to outermost JSON object.
+    i = s.find("{")
+    j = s.rfind("}")
+    if i != -1 and j != -1 and j > i:
+        s = s[i : j + 1]
+    return s
+
+def _validate_onecall_keys(obj: Dict[str, Any]) -> None:
+    expected = set(PANEL_ORDER)
+    got = set(obj.keys())
+    if got != expected:
+        missing = [k for k in PANEL_ORDER if k not in obj]
+        extra = [k for k in obj.keys() if k not in expected]
+        raise ValueError(f"Bad JSON keys. missing={missing} extra={extra}")
+
+def _build_onecall_user_content(shared_wrapper: str) -> str:
+    # Tie each key explicitly to its panel prompt to reduce confusion.
+    panel_specs: List[str] = []
+    for k in PANEL_ORDER:
+        panel_specs.append(f"KEY: {k}\n{PANEL_PROMPTS[k].strip()}")
+    panels_block = "\n\n-----\n\n".join(panel_specs)
+
+    return f"""{ONECALL_JSON_SHAPE}
+
+PANEL REQUIREMENTS (follow for each KEY):
+{panels_block}
+
+INPUT:
+{shared_wrapper}
+"""
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError, APIError, ValueError, json.JSONDecodeError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def call_all_panels_onecall(model: str, *, shared_wrapper: str) -> Dict[str, str]:
+    client = OpenAI()
+    user_content = _build_onecall_user_content(shared_wrapper)
+
+    # Prefer hard JSON enforcement, but fall back if response_format isn't supported.
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": ONECALL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            response_format={"type": "json_object"},
+        )
+        txt = resp.choices[0].message.content or ""
+        obj = json.loads(txt)
+    except TypeError:
+        # Fallback (should be rare): parse JSON from text
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": ONECALL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        txt = resp.choices[0].message.content or ""
+        obj = json.loads(_extract_json_obj_text(txt))
+
+    if not isinstance(obj, dict):
+        raise ValueError("Model did not return a JSON object.")
+    _validate_onecall_keys(obj)
+
+    # Ensure all values are strings (your WP layer expects text)
+    out: Dict[str, str] = {}
+    for k in PANEL_ORDER:
+        out[k] = safe_str(obj.get(k, "")).strip()
+    return out
+
+
 
 def load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -405,7 +519,7 @@ def all_panels_present(obj: Dict[str, Any]) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Run xAIO buffered panels (Option 2: 12 separate calls) on a *.xaio_parsed.json.",
+        description="Run xAIO buffered panels (Option 1: ONE call) on a *.xaio_parsed.json.",
     )
     ap.add_argument("xaio_parsed_json", help="Path to *.xaio_parsed.json")
     ap.add_argument("--outdir", default="./out_buffers", help="Where to write *.buffers.json")
@@ -479,25 +593,14 @@ def main() -> int:
         out["text_truncated"] = facts["text_truncated"]
         out["text_sha256"] = facts["text_sha256"]
 
-        # Run any missing panels.
-        for k in PANEL_ORDER:
-            if isinstance(out.get(k), str) and out.get(k).strip():
-                continue
-
+        # Run panels in ONE call (Option 1) if any are missing.
+        if not all_panels_present(out):
             t0 = time.monotonic()
-            log_event(logger, stage="panel_start", item_id=item_id, message=k)
-            panel_text = call_panel(args.model, shared_wrapper=shared_wrapper, panel_prompt=PANEL_PROMPTS[k])
-            out[k] = (panel_text or "").strip()
-            log_event(
-                logger,
-                stage="panel_done",
-                item_id=item_id,
-                elapsed_ms_value=elapsed_ms(t0),
-                message=k,
-            )
-
-            # Persist after each panel so a later retry can resume.
-            write_json(out_path, out)
+            log_event(logger, stage="onecall_start", item_id=item_id, message="buffers_onecall")
+            panels = call_all_panels_onecall(args.model, shared_wrapper=shared_wrapper)
+            for k in PANEL_ORDER:
+                out[k] = panels.get(k, "").strip()
+            log_event(logger, stage="onecall_done", item_id=item_id, elapsed_ms_value=elapsed_ms(t0), message="buffers_onecall")
 
         # Final write (pretty JSON)
         write_json(out_path, out)
