@@ -405,7 +405,7 @@ def all_panels_present(obj: Dict[str, Any]) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Run xAIO buffered panels (Option 2: 12 separate calls) on a *.xaio_parsed.json.",
+        description="Run xAIO buffered panels (Option 1: ONE call) on a *.xaio_parsed.json.",
     )
     ap.add_argument("xaio_parsed_json", help="Path to *.xaio_parsed.json")
     ap.add_argument("--outdir", default="./out_buffers", help="Where to write *.buffers.json")
