@@ -73,6 +73,11 @@ class WPQueueConfig:
     col_xaio_path: str
     col_xaio_error: str
 
+    # Buffered panels columns (NEW)
+    col_buffers_status: str
+    col_buffers_path: str
+    col_buffers_error: str
+
     col_wp_status: str
     col_wp_post_id: str
     col_wp_error: str
@@ -92,6 +97,7 @@ def load_config(path: str = "config.yaml") -> WPQueueConfig:
 
     sheet = data["sheet"]
     cols_ai = data.get("columns_ai", {})
+    cols_buf = data.get("columns_buffers", {})
     cols_wp = data.get("columns_wp", {})
     wp = data.get("wordpress", {})
 
@@ -99,6 +105,11 @@ def load_config(path: str = "config.yaml") -> WPQueueConfig:
     col_xaio_status = cols_ai.get("xaio_status", "Q")
     col_xaio_path = cols_ai.get("xaio_path", "R")
     col_xaio_error = cols_ai.get("xaio_error", "S")
+
+    # Buffered panels columns (stage between XAIO and WP upload)
+    col_buffers_status = cols_buf.get("buffers_status", "X")
+    col_buffers_path = cols_buf.get("buffers_path", "Y")
+    col_buffers_error = cols_buf.get("buffers_error", "Z")
 
     # WP columns
     col_wp_status = cols_wp.get("wp_status", "U")
@@ -112,6 +123,10 @@ def load_config(path: str = "config.yaml") -> WPQueueConfig:
         col_xaio_status=col_xaio_status,
         col_xaio_path=col_xaio_path,
         col_xaio_error=col_xaio_error,
+
+        col_buffers_status=col_buffers_status,
+        col_buffers_path=col_buffers_path,
+        col_buffers_error=col_buffers_error,
 
         col_wp_status=col_wp_status,
         col_wp_post_id=col_wp_post_id,
@@ -269,6 +284,23 @@ def load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# Buffered panel field names (SCF field names)
+BUFFER_PANEL_KEYS: List[str] = [
+    "aio_panel_01_intent_buffer",
+    "aio_panel_02_story_spine_buffer",
+    "aio_panel_03_definitions_buffer",
+    "aio_panel_04_evidence_posture_buffer",
+    "aio_panel_05_uncertainty_buffer",
+    "aio_panel_06_omissions_buffer",
+    "aio_panel_07_rhetoric_buffer",
+    "aio_panel_08_normative_buffer",
+    "aio_panel_09_predictions_buffer",
+    "aio_panel_10_actor_map_buffer",
+    "aio_panel_11_internal_consistency_buffer",
+    "aio_panel_12_falsifiability_buffer",
+]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=os.getenv("XAIO_CONFIG_PATH", ".runtime/config.yaml"))
@@ -284,6 +316,9 @@ def main() -> int:
     idx_xaio_status = col_letter_to_index(cfg.col_xaio_status)
     idx_xaio_path = col_letter_to_index(cfg.col_xaio_path)
 
+    idx_buf_status = col_letter_to_index(cfg.col_buffers_status)
+    idx_buf_path = col_letter_to_index(cfg.col_buffers_path)
+
     idx_wp_status = col_letter_to_index(cfg.col_wp_status)
     idx_wp_post_id = col_letter_to_index(cfg.col_wp_post_id)
     idx_wp_error = col_letter_to_index(cfg.col_wp_error)
@@ -297,9 +332,15 @@ def main() -> int:
         xaio_status = get_cell(row, idx_xaio_status)
         xaio_path_s = get_cell(row, idx_xaio_path)
 
+        buf_status = get_cell(row, idx_buf_status)
+        buf_path_s = get_cell(row, idx_buf_path)
+
         wp_status = get_cell(row, idx_wp_status)
 
         if xaio_status != "XAIO_DONE":
+            continue
+        # Require buffered panels before publishing
+        if buf_status != "BUFFERS_DONE":
             continue
         if not xaio_path_s:
             continue
@@ -327,6 +368,34 @@ def main() -> int:
         meta_raw = safe_str(xaio.get("meta", "")).strip()
         claims_raw = safe_str(xaio.get("claims", "")).strip()
 
+        # Buffered panels (required)
+        if not buf_path_s:
+            err = "BUFFERS_DONE but buffers_path is empty"
+            safe_update_cells(wks, i, {
+                cfg.col_wp_status: "WP_FAILED",
+                cfg.col_wp_post_id: "",
+                cfg.col_wp_error: err,
+            }, item_id=item_id, url=canonical_url)
+            log_event(logger, stage="wp_failed", item_id=item_id, row=i, url=canonical_url,
+                      elapsed_ms_value=elapsed_ms(row_start), message=err, level=logging.ERROR)
+            processed += 1
+            continue
+
+        buf_path = Path(buf_path_s).expanduser()
+        if not buf_path.exists():
+            err = f"buffers file not found: {buf_path}"
+            safe_update_cells(wks, i, {
+                cfg.col_wp_status: "WP_FAILED",
+                cfg.col_wp_post_id: "",
+                cfg.col_wp_error: err,
+            }, item_id=item_id, url=canonical_url)
+            log_event(logger, stage="wp_failed", item_id=item_id, row=i, url=canonical_url,
+                      elapsed_ms_value=elapsed_ms(row_start), message=err, level=logging.ERROR)
+            processed += 1
+            continue
+
+        buffers = load_json(buf_path)
+
         # Topics
         topics: List[str] = []
         try:
@@ -352,6 +421,19 @@ def main() -> int:
             "meta": meta_raw,
             "claims": claims_raw,
         }
+
+        # Attach buffered panel fields (SCF field names)
+        payload["aio_schema_version"] = safe_str(buffers.get("aio_schema_version", "")).strip()
+        payload["aio_generated_at"] = safe_str(buffers.get("aio_generated_at", "")).strip()
+
+        # Store a canonical JSON blob for later machine parsing
+        try:
+            payload["aio_analysis_json"] = json.dumps(buffers, ensure_ascii=False, indent=2)
+        except Exception:
+            payload["aio_analysis_json"] = safe_str(buffers)
+
+        for k in BUFFER_PANEL_KEYS:
+            payload[k] = safe_str(buffers.get(k, ""))
 
         # Mark WP_RUNNING
         safe_update_cells(wks, i, {

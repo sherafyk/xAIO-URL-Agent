@@ -59,7 +59,7 @@ python -c "import readability" >/dev/null 2>&1 && say_ok "readability installed"
 [[ -f config/scf-export-content.json ]] && say_ok "SCF export present" || say_warn "SCF export missing (needed for enums)"
 
 # Output dirs
-for d in out out_ai out_ai_meta out_meta out_claims out_xaio out_wp locks .runtime .runtime/secrets; do
+for d in out out_ai out_ai_meta out_meta out_claims out_xaio out_buffers out_wp locks .runtime .runtime/secrets; do
   [[ -d "$d" ]] && say_ok "dir exists: $d" || say_warn "dir missing: $d"
 done
 
